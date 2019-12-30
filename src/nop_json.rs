@@ -4,7 +4,6 @@ use crate::value::{Value, VALUE_NUM_MANTISSA_BYTES};
 use std::{io, io::Write, char, fmt, borrow::Cow};
 use numtoa::NumToA;
 use std::collections::{HashMap, HashSet, BTreeSet, LinkedList, VecDeque};
-use std::convert::TryFrom;
 
 const VALUE_NUM_MANTISSA_BYTES_Z: [u8; VALUE_NUM_MANTISSA_BYTES] = [b'0'; VALUE_NUM_MANTISSA_BYTES];
 const READER_BUFFER_SIZE: usize = 128;
@@ -1189,18 +1188,6 @@ impl<T> Reader<T> where T: io::Read
 		}
 	}
 
-	fn u_escape_to_byte(&mut self, buf_pos: usize) -> io::Result<u8>
-	{	let mut buffer = [0u8; 4];
-		self.reader.read_exact(&mut buffer)?;
-		if buffer[0]!=b'0' || buffer[1]!=b'0'
-		{	Err(self.format_error("Escape sequence doesn't map to 8-bit while reading blob"))
-		}
-		else
-		{	let c = (self.hex_to_u32(buffer[2])? << 4) | self.hex_to_u32(buffer[3])?;
-			Ok(c as u8)
-		}
-	}
-
 	#[inline]
 	fn hex_to_u32(&self, c: u8) -> io::Result<u32>
 	{	match c
@@ -1312,7 +1299,7 @@ impl<T> Reader<T> where T: io::Read
 						b'b' => 8,
 						b'f' => 12,
 						b'u' =>
-						{	if len+4 >= self.buffer.len() {writer.write_all(&self.buffer[0 .. len]); len = 0}
+						{	if len+4 >= self.buffer.len() {writer.write_all(&self.buffer[0 .. len])?; len = 0}
 							len += self.u_escape_to_utf8(len)?;
 							continue;
 						},
@@ -1321,7 +1308,7 @@ impl<T> Reader<T> where T: io::Read
 				}
 				_ => c
 			};
-			if len >= self.buffer.len() {writer.write_all(&self.buffer[0 .. len]); len = 0}
+			if len >= self.buffer.len() {writer.write_all(&self.buffer[0 .. len])?; len = 0}
 			self.buffer[len] = c;
 			len += 1;
 		}

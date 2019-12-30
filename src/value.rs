@@ -1,6 +1,5 @@
-use std::{io, io::Write, char, fmt, borrow::Cow};
-use numtoa::NumToA;
-use std::collections::{HashMap, HashSet, BTreeSet, LinkedList, VecDeque};
+use std::char;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 
 pub const VALUE_NUM_MANTISSA_BYTES: usize = 24;
