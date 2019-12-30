@@ -10,5 +10,5 @@ repository = "https://github.com/jeremiah-shaulov/nop-json"
 keywords = ["json"]
 
 [dependencies]
-numtoa = "*"
+numtoa = "0.2"
 nop-json-derive = {git = "https://github.com/jeremiah-shaulov/nop-json-derive"}
