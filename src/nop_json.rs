@@ -1143,13 +1143,34 @@ impl<T> Reader<T> where T: io::Read
 		self.reader.read_exact(&mut buffer)?;
 		let c = (self.hex_to_u32(buffer[0])? << 12) | (self.hex_to_u32(buffer[1])? << 8) | (self.hex_to_u32(buffer[2])? << 4) | self.hex_to_u32(buffer[3])?;
 		if c <= 0x7F
-		{	Ok((&mut self.buffer[buf_pos ..]).write(&[c as u8]).unwrap())
+		{	if buf_pos == self.buffer.len()
+			{	Ok(0)
+			}
+			else
+			{	self.buffer[buf_pos] = c as u8;
+				Ok(1)
+			}
 		}
 		else if c <= 0x7FF
-		{	Ok((&mut self.buffer[buf_pos ..]).write(&[(0xC0 | (c >> 6)) as u8, (0x80 | (c & 0x3F)) as u8]).unwrap())
+		{	if buf_pos+1 >= self.buffer.len()
+			{	Ok((&mut self.buffer[buf_pos ..]).write(&[(0xC0 | (c >> 6)) as u8, (0x80 | (c & 0x3F)) as u8]).unwrap())
+			}
+			else
+			{	self.buffer[buf_pos] = (0xC0 | (c >> 6)) as u8;
+				self.buffer[buf_pos+1] = (0x80 | (c & 0x3F)) as u8;
+				Ok(2)
+			}
 		}
 		else if c <= 0xD7FF || c >= 0xE000
-		{	Ok((&mut self.buffer[buf_pos ..]).write(&[(0xE0 | (c >> 12)) as u8, (0x80 | ((c >> 6) & 0x3F)) as u8, (0x80 | (c & 0x3F)) as u8]).unwrap())
+		{	if buf_pos+2 >= self.buffer.len()
+			{	Ok((&mut self.buffer[buf_pos ..]).write(&[(0xE0 | (c >> 12)) as u8, (0x80 | ((c >> 6) & 0x3F)) as u8, (0x80 | (c & 0x3F)) as u8]).unwrap())
+			}
+			else
+			{	self.buffer[buf_pos] = (0xE0 | (c >> 12)) as u8;
+				self.buffer[buf_pos+1] = (0x80 | ((c >> 6) & 0x3F)) as u8;
+				self.buffer[buf_pos+2] = (0x80 | (c & 0x3F)) as u8;
+				Ok(2)
+			}
 		}
 		else if c <= 0xDBFF
 		{	// UTF-16 surrogate pairs
@@ -1164,7 +1185,19 @@ impl<T> Reader<T> where T: io::Read
 			}
 		}
 		else
-		{	Err(self.format_error("Invalid UTF-16 surrogate pair"))
+		{	Err(self.format_error("Escape sequence doesn't map to UTF-8"))
+		}
+	}
+
+	fn u_escape_to_byte(&mut self, buf_pos: usize) -> io::Result<u8>
+	{	let mut buffer = [0u8; 4];
+		self.reader.read_exact(&mut buffer)?;
+		if buffer[0]!=b'0' || buffer[1]!=b'0'
+		{	Err(self.format_error("Escape sequence doesn't map to 8-bit while reading blob"))
+		}
+		else
+		{	let c = (self.hex_to_u32(buffer[2])? << 4) | self.hex_to_u32(buffer[3])?;
+			Ok(c as u8)
 		}
 	}
 
@@ -1179,6 +1212,10 @@ impl<T> Reader<T> where T: io::Read
 	}
 
 	fn read_string_contents(&mut self) -> io::Result<String>
+	{	String::from_utf8(self.read_blob_contents()?).map_err(|_| self.format_error("Invalid UTF-8 string"))
+	}
+
+	fn read_blob_contents(&mut self) -> io::Result<Vec<u8>>
 	{	let mut bytes = Vec::new();
 		let mut buffer = [0u8; 1];
 		loop
@@ -1206,7 +1243,7 @@ impl<T> Reader<T> where T: io::Read
 			}
 		}
 		self.lookahead = b' ';
-		String::from_utf8(bytes).map_err(|_| self.format_error("Invalid UTF-8 string"))
+		Ok(bytes)
 	}
 
 	fn read_string_contents_as_bytes(&mut self) -> io::Result<()>
@@ -1224,19 +1261,70 @@ impl<T> Reader<T> where T: io::Read
 				{	self.reader.read_exact(&mut buffer)?;
 					let c = buffer[0];
 					match c
-					{	b'r' => len += (&mut self.buffer[len ..]).write(&[b'\r']).unwrap(),
-						b'n' => len += (&mut self.buffer[len ..]).write(&[b'\n']).unwrap(),
-						b't' => len += (&mut self.buffer[len ..]).write(&[b'\t']).unwrap(),
-						b'b' => len += (&mut self.buffer[len ..]).write(&[8]).unwrap(),
-						b'f' => len += (&mut self.buffer[len ..]).write(&[12]).unwrap(),
-						b'u' => len += self.u_escape_to_utf8(len)?,
-						_ => len += (&mut self.buffer[len ..]).write(&[c]).unwrap()
+					{	b'r' =>
+						{	if len < self.buffer.len() {self.buffer[len] = b'\r'; len += 1}
+						},
+						b'n' =>
+						{	if len < self.buffer.len() {self.buffer[len] = b'\n'; len += 1}
+						},
+						b't' =>
+						{	if len < self.buffer.len() {self.buffer[len] = b'\t'; len += 1}
+						},
+						b'b' =>
+						{	if len < self.buffer.len() {self.buffer[len] = 8; len += 1}
+						},
+						b'f' =>
+						{	if len < self.buffer.len() {self.buffer[len] = 12; len += 1}
+						},
+						b'u' =>
+						{	len += self.u_escape_to_utf8(len)?
+						},
+						_ =>
+						{	if len < self.buffer.len() {self.buffer[len] = c; len += 1}
+						}
 					}
 				}
 				_ => len += (&mut self.buffer[len ..]).write(&[c]).unwrap()
 			}
 		}
 		self.buffer_len = len;
+		Ok(())
+	}
+
+	fn pipe_blob_contents<U>(&mut self, writer: &mut U) -> io::Result<()> where U: io::Write
+	{	let mut len = 0;
+		let mut buffer = [0u8; 1];
+		loop
+		{	self.reader.read_exact(&mut buffer)?;
+			let c = buffer[0];
+			let c = match c
+			{	b'"' =>
+				{	self.lookahead = b' ';
+					break;
+				}
+				b'\\' =>
+				{	self.reader.read_exact(&mut buffer)?;
+					let c = buffer[0];
+					match c
+					{	b'r' => b'\r',
+						b'n' => b'\n',
+						b't' => b'\t',
+						b'b' => 8,
+						b'f' => 12,
+						b'u' =>
+						{	if len+4 >= self.buffer.len() {writer.write_all(&self.buffer[0 .. len]); len = 0}
+							len += self.u_escape_to_utf8(len)?;
+							continue;
+						},
+						_ => c
+					}
+				}
+				_ => c
+			};
+			if len >= self.buffer.len() {writer.write_all(&self.buffer[0 .. len]); len = 0}
+			self.buffer[len] = c;
+			len += 1;
+		}
 		Ok(())
 	}
 
@@ -1554,9 +1642,7 @@ impl<T> Reader<T> where T: io::Read
 			{	let len = number_to_string(&mut self.buffer, self.buffer_len, exponent, is_negative).map_err(|_| self.number_error())?;
 				Ok(String::from_utf8_lossy(&self.buffer[0 .. len]).into_owned())
 			},
-			Token::Quote =>
-			{	self.read_string_contents()
-			},
+			Token::Quote => self.read_string_contents(),
 			Token::ArrayBegin => Err(self.format_error("Value must be string, not array")),
 			Token::ArrayEnd => Err(self.format_error("Invalid JSON input: unexpected ']'")),
 			Token::ObjectBegin => Err(self.format_error("Value must be string, not object")),
@@ -1588,6 +1674,63 @@ impl<T> Reader<T> where T: io::Read
 			{	self.read_string_contents_as_bytes()?;
 				Ok(&self.buffer[0 .. self.buffer_len])
 			},
+			Token::ArrayBegin => Err(self.format_error("Value must be string, not array")),
+			Token::ArrayEnd => Err(self.format_error("Invalid JSON input: unexpected ']'")),
+			Token::ObjectBegin => Err(self.format_error("Value must be string, not object")),
+			Token::ObjectEnd => Err(self.format_error("Invalid JSON input: unexpected '}'")),
+			Token::Comma => Err(self.format_error("Invalid JSON input: unexpected ','")),
+			Token::Colon => Err(self.format_error("Invalid JSON input: unexpected ':'")),
+		}
+	}
+
+	/// This function allows us to exploit standard JSON containers to pass binary data (BLOBs, binary large objects, or `Vec<u8>`).
+	/// Does JSON standard strictly prohibit us to do so? Lets understand the principle behind this criminal operation.
+	///
+	/// Mr. JSON wants us to interchange only unicode strings. But he doesn't specify what unicode it must be: utf-8, utf-16, or other.
+	/// What is invalid utf-8 can be valid utf-16, and what is invalid utf-16 can be valid something else. Furthermore, passing invalid strings is normal, it happens every day.
+	/// The receiver of invalid string must reject it immediately, and not use it for his profit.
+	/// This library obeys to this requirement, and invalid utf-8 (only this encoding is supported) will fail conversion from `Vec<u8>` to `String`.
+	/// So reading an invalid utf-8 byte sequence to a `String` variable will really return error.
+	/// But `nop-json` library can optionally return you the `Vec<u8>` and tell you to convert it to `String` by yourself.
+	/// And you may decide not to do so, and get your hands on this useful byte sequence.
+	///
+	/// The trouble here is only with bytes in range `80 - FF`. Here is how we can encode our binary object:
+	/// 1) `00 - 1F` - we can encode with the `\u00xx` encoding - this is the only option.
+	/// 2) `20 - 7F` except `"` and `\` - we can leave intact - they are valid utf-8 JSON, or optionally we can encode them with `\u00xx`.
+	/// 3) `"` and `\` - escape with a slash.
+	/// 4) `80 - FF` - if we leave them as they are, this will make our string invalid utf-8 (but valid JSON container).
+	/// Ask yourself can you live with this. Another option could be to encode these characters with `\u00xx` sequences, but `\u0080` expands to 2-byte utf-8 character.
+	/// ```
+	/// use nop_json::Reader;
+	///
+	/// let mut reader = Reader::new(&b" \"\x80\x81\" "[..]);
+	///
+	/// let data = reader.read_blob().unwrap();
+	/// assert_eq!(data, b"\x80\x81");
+	/// ```
+	pub fn read_blob(&mut self) -> io::Result<Vec<u8>>
+	{	match self.next_token()?
+		{	Token::Null => Ok(Vec::new()),
+			Token::False => Err(self.format_error("Value must be string, not boolean")),
+			Token::True => Err(self.format_error("Value must be string, not boolean")),
+			Token::Number(_exponent, _is_negative) => Err(self.format_error("Value must be string, not number")),
+			Token::Quote => self.read_blob_contents(),
+			Token::ArrayBegin => Err(self.format_error("Value must be string, not array")),
+			Token::ArrayEnd => Err(self.format_error("Invalid JSON input: unexpected ']'")),
+			Token::ObjectBegin => Err(self.format_error("Value must be string, not object")),
+			Token::ObjectEnd => Err(self.format_error("Invalid JSON input: unexpected '}'")),
+			Token::Comma => Err(self.format_error("Invalid JSON input: unexpected ','")),
+			Token::Colon => Err(self.format_error("Invalid JSON input: unexpected ':'")),
+		}
+	}
+
+	pub fn pipe_blob<U>(&mut self, writer: &mut U) -> io::Result<()> where U: io::Write
+	{	match self.next_token()?
+		{	Token::Null => Ok(()),
+			Token::False => Err(self.format_error("Value must be string, not boolean")),
+			Token::True => Err(self.format_error("Value must be string, not boolean")),
+			Token::Number(_exponent, _is_negative) => Err(self.format_error("Value must be string, not number")),
+			Token::Quote => self.pipe_blob_contents(writer),
 			Token::ArrayBegin => Err(self.format_error("Value must be string, not array")),
 			Token::ArrayEnd => Err(self.format_error("Invalid JSON input: unexpected ']'")),
 			Token::ObjectBegin => Err(self.format_error("Value must be string, not object")),

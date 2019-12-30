@@ -24,13 +24,13 @@ macro_rules! get_num
 				{	result = ($mantissa[pos] - b'0') as $T;
 					if !$is_unsigned && $is_negative
 					{	result = result.wrapping_neg();
-						for c in ($mantissa[pos .. buffer_len]).iter()
+						for c in ($mantissa[pos+1 .. buffer_len]).iter()
 						{	result = result.checked_mul(10).ok_or(())?;
 							result = result.checked_sub((c - b'0') as $T).ok_or(())?;
 						}
 					}
 					else
-					{	for c in ($mantissa[pos .. buffer_len]).iter()
+					{	for c in ($mantissa[pos+1 .. buffer_len]).iter()
 						{	result = result.checked_mul(10).ok_or(())?;
 							result = result.checked_add((c - b'0') as $T).ok_or(())?;
 						}

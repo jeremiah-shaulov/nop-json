@@ -9,7 +9,7 @@
 //! And serialization back to JSON through [DebugToJson](trait.DebugToJson.html) trait, that acts like `Debug`, allowing to
 //! print your objects with `println!()` and such.
 //!
-//! It allows to read whitespece-separated JSON values from stream in sequence.
+//! It allows to read whitespece-separated JSON values from stream in sequence. It also allows to pipe blob strings to a writer.
 //!
 //! This implementation avoids unnecessary memory allocations and temporary object creations.
 //!
@@ -99,6 +99,9 @@
 //! let _: () = reader.read().unwrap();
 //! let _: () = reader.read().unwrap();
 //! ```
+//!
+//! ## Reading binary data
+//! See [read_blob](struct.Reader.html#method.read_blob).
 
 extern crate numtoa;
 extern crate nop_json_derive;

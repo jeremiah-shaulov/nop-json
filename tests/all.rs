@@ -1,4 +1,4 @@
-use nop_json::{Reader, TryFromJson, DebugToJson, escape};
+use nop_json::{Reader, Value, TryFromJson, DebugToJson, escape};
 
 #[test]
 fn test_number()
@@ -234,4 +234,14 @@ fn test_object()
 fn test_escape()
 {	assert_eq!(escape("abc"), "abc");
 	assert_eq!(escape("a\\b\"c"), "a\\\\b\\\"c");
+}
+
+#[test]
+fn test_value()
+{	use std::convert::TryInto;
+
+	let mut reader = Reader::new(r#" 123 "#.as_bytes());
+	let v: Value = reader.read().unwrap();
+	let v: i32 = v.try_into().unwrap();
+	assert_eq!(v, 123);
 }
