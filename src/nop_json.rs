@@ -1312,6 +1312,9 @@ impl<T> Reader<T> where T: io::Read
 			self.buffer[len] = c;
 			len += 1;
 		}
+		if len > 0
+		{	writer.write_all(&self.buffer[0 .. len])?;
+		}
 		Ok(())
 	}
 

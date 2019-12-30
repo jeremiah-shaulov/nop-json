@@ -1,4 +1,5 @@
 use nop_json::{Reader, Value, TryFromJson, DebugToJson, escape};
+use std::io::Error;
 
 #[test]
 fn test_number()
@@ -244,4 +245,55 @@ fn test_value()
 	let v: Value = reader.read().unwrap();
 	let v: i32 = v.try_into().unwrap();
 	assert_eq!(v, 123);
+}
+
+#[test]
+fn test_pipe()
+{	use std::io;
+
+	const N_CHARS: usize = 300;
+	let mut data = Vec::new();
+	let mut expected_data = Vec::new();
+	data.push(b'"');
+	for i in 0..N_CHARS
+	{	let i = (i % 256) as u8;
+		if i < 32
+		{	for c in format!("\\u{:04x}", i).chars()
+			{	data.push(c as u8);
+			}
+		}
+		else if i==b'\\' || i==b'"'
+		{	data.push(b'\\');
+			data.push(i);
+		}
+		else
+		{	data.push(i);
+		}
+		expected_data.push(i);
+	}
+	data.push(b'"');
+
+	struct Writer
+	{	data: Vec<u8>,
+		n_parts: usize,
+	}
+	impl io::Write for Writer
+	{	fn write(&mut self, buf: &[u8]) -> io::Result<usize>
+		{	self.data.extend_from_slice(buf);
+			self.n_parts += 1;
+			Ok(buf.len())
+		}
+
+		fn flush(&mut self) -> Result<(), Error>
+		{	Ok(())
+		}
+	}
+
+	let mut writer = Writer {data: Vec::new(), n_parts: 0};
+
+	let mut reader = Reader::new(&data[..]);
+	reader.pipe_blob(&mut writer).unwrap();
+
+	assert_eq!(writer.data, expected_data);
+	assert_eq!(writer.n_parts, 3); // ceil(N_CHARS / READER_BUFFER_SIZE)
 }
