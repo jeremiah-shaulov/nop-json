@@ -11,4 +11,4 @@ keywords = ["json"]
 
 [dependencies]
 numtoa = "0.2"
-nop-json-derive = {git = "https://github.com/jeremiah-shaulov/nop-json-derive"}
+nop-json-derive = "0.0"
