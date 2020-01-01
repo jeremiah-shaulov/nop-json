@@ -13,6 +13,15 @@
 //!
 //! This implementation avoids unnecessary memory allocations and temporary object creations.
 //!
+//! # Installation
+//!
+//! In `Cargo.toml` of your project add:
+//!
+//! ```toml
+//! [dependencies]
+//! nop-json = "0.0"
+//! ```
+//!
 //! # Examples
 //!
 //! ## Deserializing simple values

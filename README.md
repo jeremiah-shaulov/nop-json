@@ -1,5 +1,7 @@
 # nop-json
 
+[![crates.io](https://img.shields.io/crates/v/nop-json.svg)](https://crates.io/crates/nop-json)
+
 This is full-featured modern JSON implementation according to ECMA-404 standard.
 
 This crate allows deserialization of JSON `io::Read` stream into primitive types (`bool`, `i32`, etc.),
@@ -12,6 +14,16 @@ print your objects with `println!()` and such.
 It allows to read whitespece-separated JSON values from stream in sequence. It also allows to pipe blob strings to a writer.
 
 This implementation avoids unnecessary memory allocations and temporary object creations.
+
+[Documentation](https://docs.rs/nop-json/0.0.4/nop_json/)
+
+# Installation
+
+In `Cargo.toml` of your project add:
+```toml
+[dependencies]
+nop-json = "0.0"
+```
 
 ## Examples
 

@@ -251,6 +251,7 @@ fn test_value()
 fn test_pipe()
 {	use std::io;
 
+	const READER_BUFFER_SIZE: usize = 128;
 	const N_CHARS: usize = 300;
 	let mut data = Vec::new();
 	let mut expected_data = Vec::new();
@@ -295,5 +296,5 @@ fn test_pipe()
 	reader.pipe_blob(&mut writer).unwrap();
 
 	assert_eq!(writer.data, expected_data);
-	assert_eq!(writer.n_parts, 3); // ceil(N_CHARS / READER_BUFFER_SIZE)
+	assert_eq!(writer.n_parts, (N_CHARS as f64 / READER_BUFFER_SIZE as f64).ceil() as usize);
 }

@@ -3,7 +3,7 @@ use crate::value::{Value, VALUE_NUM_MANTISSA_BYTES};
 
 use std::{io, io::Write, char, fmt, borrow::Cow};
 use numtoa::NumToA;
-use std::collections::{HashMap, HashSet, BTreeSet, LinkedList, VecDeque};
+use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet, LinkedList, VecDeque};
 
 const VALUE_NUM_MANTISSA_BYTES_Z: [u8; VALUE_NUM_MANTISSA_BYTES] = [b'0'; VALUE_NUM_MANTISSA_BYTES];
 const READER_BUFFER_SIZE: usize = 128;
@@ -486,6 +486,156 @@ impl<U> TryFromJson for HashMap<String, U> where U: TryFromJson
 	}
 }
 
+impl<U> TryFromJson for BTreeMap<String, U> where U: TryFromJson
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+	{	let mut result = BTreeMap::new();
+		reader.read_object
+		(	|reader, key|
+			{	result.insert(key, reader.read_index()?);
+				Ok(())
+			}
+		)?;
+		Ok(result)
+	}
+}
+
+impl<U, V> TryFromJson for (U, V) where U: TryFromJson, V: TryFromJson
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+	{	let (a, b) = match reader.next_token()?
+		{	Token::Null => return Err(reader.format_error("Value must be array[2], not null")),
+			Token::False => return Err(reader.format_error("Value must be array[2], not boolean")),
+			Token::True => return Err(reader.format_error("Value must be array[2], not boolean")),
+			Token::Number(_e, _n) => return Err(reader.format_error("Value must be array[2], not number")),
+			Token::Quote => return Err(reader.format_error("Value must be array[2], not string")),
+			Token::ArrayBegin =>
+			{	// begin read tuple
+				reader.path.push(PathItem::Index(0));
+				// .0
+				let a = U::try_from_json(reader)?;
+				match reader.next_token()?
+				{	Token::Null => return Err(reader.format_error("Invalid JSON input: expected ',', got null")),
+					Token::False => return Err(reader.format_error("Invalid JSON input: expected ',', got false")),
+					Token::True => return Err(reader.format_error("Invalid JSON input: expected ',', got true")),
+					Token::Number(_e, _n) => return Err(reader.format_error("Invalid JSON input: expected ',', got number")),
+					Token::Quote => return Err(reader.format_error("Invalid JSON input: expected ',', got string")),
+					Token::ArrayBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '['")),
+					Token::ArrayEnd => return Err(reader.format_error("Value must be array[2], not array[1]")),
+					Token::ObjectBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '{'")),
+					Token::ObjectEnd => return Err(reader.format_error("Invalid JSON input: expected ',', got '}'")),
+					Token::Comma => {},
+					Token::Colon => return Err(reader.format_error("Invalid JSON input: expected ',', got ':'")),
+				}
+				// next
+				if let Some(p) = reader.path.last_mut()
+				{	*p = PathItem::Index(1);
+				}
+				// .1
+				let b = V::try_from_json(reader)?;
+				match reader.next_token()?
+				{	Token::Null => return Err(reader.format_error("Invalid JSON input: expected ',', got null")),
+					Token::False => return Err(reader.format_error("Invalid JSON input: expected ',', got false")),
+					Token::True => return Err(reader.format_error("Invalid JSON input: expected ',', got true")),
+					Token::Number(_e, _n) => return Err(reader.format_error("Invalid JSON input: expected ',', got number")),
+					Token::Quote => return Err(reader.format_error("Invalid JSON input: expected ',', got string")),
+					Token::ArrayBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '['")),
+					Token::ArrayEnd => {},
+					Token::ObjectBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '{'")),
+					Token::ObjectEnd => return Err(reader.format_error("Invalid JSON input: expected ',', got '}'")),
+					Token::Comma => return Err(reader.format_error("Expected array with 2 elements, got more")),
+					Token::Colon => return Err(reader.format_error("Invalid JSON input: expected ',', got ':'")),
+				}
+				// end read tuple
+				reader.path.pop();
+				(a, b)
+			}
+			Token::ArrayEnd => return Err(reader.format_error("Invalid JSON input: unexpected ']'")),
+			Token::ObjectBegin => return Err(reader.format_error("Value must be array[2], not object")),
+			Token::ObjectEnd => return Err(reader.format_error("Invalid JSON input: unexpected '}'")),
+			Token::Comma => return Err(reader.format_error("Invalid JSON input: unexpected ','")),
+			Token::Colon => return Err(reader.format_error("Invalid JSON input: unexpected ':'")),
+		};
+		Ok((a, b))
+	}
+}
+
+impl<U, V, W> TryFromJson for (U, V, W) where U: TryFromJson, V: TryFromJson, W: TryFromJson
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+	{	let (a, b, c) = match reader.next_token()?
+		{	Token::Null => return Err(reader.format_error("Value must be array[3], not null")),
+			Token::False => return Err(reader.format_error("Value must be array[3], not boolean")),
+			Token::True => return Err(reader.format_error("Value must be array[3], not boolean")),
+			Token::Number(_e, _n) => return Err(reader.format_error("Value must be array[3], not number")),
+			Token::Quote => return Err(reader.format_error("Value must be array[3], not string")),
+			Token::ArrayBegin =>
+			{	// begin read tuple
+				reader.path.push(PathItem::Index(0));
+				// .0
+				let a = U::try_from_json(reader)?;
+				match reader.next_token()?
+				{	Token::Null => return Err(reader.format_error("Invalid JSON input: expected ',', got null")),
+					Token::False => return Err(reader.format_error("Invalid JSON input: expected ',', got false")),
+					Token::True => return Err(reader.format_error("Invalid JSON input: expected ',', got true")),
+					Token::Number(_e, _n) => return Err(reader.format_error("Invalid JSON input: expected ',', got number")),
+					Token::Quote => return Err(reader.format_error("Invalid JSON input: expected ',', got string")),
+					Token::ArrayBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '['")),
+					Token::ArrayEnd => return Err(reader.format_error("Value must be array[3], not array[1]")),
+					Token::ObjectBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '{'")),
+					Token::ObjectEnd => return Err(reader.format_error("Invalid JSON input: expected ',', got '}'")),
+					Token::Comma => {},
+					Token::Colon => return Err(reader.format_error("Invalid JSON input: expected ',', got ':'")),
+				}
+				// next
+				if let Some(p) = reader.path.last_mut()
+				{	*p = PathItem::Index(1);
+				}
+				// .1
+				let b = V::try_from_json(reader)?;
+				match reader.next_token()?
+				{	Token::Null => return Err(reader.format_error("Invalid JSON input: expected ',', got null")),
+					Token::False => return Err(reader.format_error("Invalid JSON input: expected ',', got false")),
+					Token::True => return Err(reader.format_error("Invalid JSON input: expected ',', got true")),
+					Token::Number(_e, _n) => return Err(reader.format_error("Invalid JSON input: expected ',', got number")),
+					Token::Quote => return Err(reader.format_error("Invalid JSON input: expected ',', got string")),
+					Token::ArrayBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '['")),
+					Token::ArrayEnd => return Err(reader.format_error("Value must be array[3], not array[2]")),
+					Token::ObjectBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '{'")),
+					Token::ObjectEnd => return Err(reader.format_error("Invalid JSON input: expected ',', got '}'")),
+					Token::Comma => {},
+					Token::Colon => return Err(reader.format_error("Invalid JSON input: expected ',', got ':'")),
+				}
+				// next
+				if let Some(p) = reader.path.last_mut()
+				{	*p = PathItem::Index(2);
+				}
+				// .2
+				let c = W::try_from_json(reader)?;
+				match reader.next_token()?
+				{	Token::Null => return Err(reader.format_error("Invalid JSON input: expected ',', got null")),
+					Token::False => return Err(reader.format_error("Invalid JSON input: expected ',', got false")),
+					Token::True => return Err(reader.format_error("Invalid JSON input: expected ',', got true")),
+					Token::Number(_e, _n) => return Err(reader.format_error("Invalid JSON input: expected ',', got number")),
+					Token::Quote => return Err(reader.format_error("Invalid JSON input: expected ',', got string")),
+					Token::ArrayBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '['")),
+					Token::ArrayEnd => {},
+					Token::ObjectBegin => return Err(reader.format_error("Invalid JSON input: expected ',', got '{'")),
+					Token::ObjectEnd => return Err(reader.format_error("Invalid JSON input: expected ',', got '}'")),
+					Token::Comma => return Err(reader.format_error("Expected array with 3 elements, got more")),
+					Token::Colon => return Err(reader.format_error("Invalid JSON input: expected ',', got ':'")),
+				}
+				// end read tuple
+				reader.path.pop();
+				(a, b, c)
+			}
+			Token::ArrayEnd => return Err(reader.format_error("Invalid JSON input: unexpected ']'")),
+			Token::ObjectBegin => return Err(reader.format_error("Value must be array[3], not object")),
+			Token::ObjectEnd => return Err(reader.format_error("Invalid JSON input: unexpected '}'")),
+			Token::Comma => return Err(reader.format_error("Invalid JSON input: unexpected ','")),
+			Token::Colon => return Err(reader.format_error("Invalid JSON input: unexpected ':'")),
+		};
+		Ok((a, b, c))
+	}
+}
+
 
 // pub DebugToJson
 
@@ -727,6 +877,45 @@ impl<T> DebugToJson for HashMap<String, T> where T: DebugToJson
 		else
 		{	write!(f, "}}")
 		}
+	}
+}
+
+impl<T> DebugToJson for BTreeMap<String, T> where T: DebugToJson
+{	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+	{	let mut c = '{';
+		for (key, item) in self
+		{	write!(f, "{}\"{}\":", c, escape(key))?;
+			DebugToJson::fmt(item, f)?;
+			c = ',';
+		}
+		if c == '{'
+		{	write!(f, "{{}}")
+		}
+		else
+		{	write!(f, "}}")
+		}
+	}
+}
+
+impl<U, V> DebugToJson for (U, V) where U: DebugToJson, V: DebugToJson
+{	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+	{	write!(f, "[")?;
+		DebugToJson::fmt(&self.0, f)?;
+		write!(f, ",")?;
+		DebugToJson::fmt(&self.1, f)?;
+		write!(f, "]")
+	}
+}
+
+impl<U, V, W> DebugToJson for (U, V, W) where U: DebugToJson, V: DebugToJson, W: DebugToJson
+{	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+	{	write!(f, "[")?;
+		DebugToJson::fmt(&self.0, f)?;
+		write!(f, ",")?;
+		DebugToJson::fmt(&self.1, f)?;
+		write!(f, ",")?;
+		DebugToJson::fmt(&self.2, f)?;
+		write!(f, "]")
 	}
 }
 
