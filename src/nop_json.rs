@@ -1197,7 +1197,7 @@ impl<T> Reader<T> where T: io::Read
 								if pos > 0
 								{	n_trailing_zeroes += 1;
 									if pos < self.buffer.len()
-									{	self.buffer[pos] = c;
+									{	self.buffer[pos] = b'0';
 										pos += 1;
 									}
 								}
@@ -1219,22 +1219,26 @@ impl<T> Reader<T> where T: io::Read
 									b'-' => {buffer[0] = b'0'; n_is_negative = true}
 									b'0' ..= b'9' => {}
 									_ =>
-									{	return Err(self.format_error("Invalid JSON input: invalid number format"));
+									{	self.lookahead = buffer[0];
+										return Err(self.format_error("Invalid JSON input: invalid number format"));
 									}
 								};
 								let mut n: i32 = 0;
+								let mut is_error = false;
 								loop
 								{	match buffer[0]
-									{	b'0' => {n = n.checked_mul(10).ok_or_else(|| self.number_error())?}
-										b'1' => {n = n.checked_mul(10).and_then(|n| n.checked_add(1)).ok_or_else(|| self.number_error())?}
-										b'2' => {n = n.checked_mul(10).and_then(|n| n.checked_add(2)).ok_or_else(|| self.number_error())?}
-										b'3' => {n = n.checked_mul(10).and_then(|n| n.checked_add(3)).ok_or_else(|| self.number_error())?}
-										b'4' => {n = n.checked_mul(10).and_then(|n| n.checked_add(4)).ok_or_else(|| self.number_error())?}
-										b'5' => {n = n.checked_mul(10).and_then(|n| n.checked_add(5)).ok_or_else(|| self.number_error())?}
-										b'6' => {n = n.checked_mul(10).and_then(|n| n.checked_add(6)).ok_or_else(|| self.number_error())?}
-										b'7' => {n = n.checked_mul(10).and_then(|n| n.checked_add(7)).ok_or_else(|| self.number_error())?}
-										b'8' => {n = n.checked_mul(10).and_then(|n| n.checked_add(8)).ok_or_else(|| self.number_error())?}
-										b'9' => {n = n.checked_mul(10).and_then(|n| n.checked_add(9)).ok_or_else(|| self.number_error())?}
+									{	b'0' =>
+										{	n = match n.checked_mul(10)
+											{	Some(n) => n,
+												None => {is_error = true; n_trailing_zeroes = 1; 0} // i check for error inside if n_trailing_zeroes (for optimization)
+											}
+										}
+										b'1'..=b'9' =>
+										{	n = match n.checked_mul(10).and_then(|n| n.checked_add((buffer[0]-b'0') as i32))
+											{	Some(n) => n,
+												None => {is_error = true; n_trailing_zeroes = 1; 0} // i check for error inside if n_trailing_zeroes (for optimization)
+											}
+										}
 										_ =>
 										{	self.lookahead = buffer[0];
 											break;
@@ -1246,7 +1250,10 @@ impl<T> Reader<T> where T: io::Read
 									}
 								}
 								if n_trailing_zeroes > 0
-								{	if is_after_dot == 0
+								{	if is_error
+									{	return Err(self.number_error());
+									}
+									if is_after_dot == 0
 									{	exponent += n_trailing_zeroes;
 									}
 									pos -= n_trailing_zeroes as usize;
