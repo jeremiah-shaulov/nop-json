@@ -3,7 +3,7 @@ use std::io::Error;
 
 #[test]
 fn test_number()
-{	let mut reader = Reader::new(r#" 0 0.01 123 128 -128 -129 255 -1 -1e+2 1e2 123e-7 0.0123e-10 1e-1000000 1e10000000000 "hello" true "#.as_bytes());
+{	let mut reader = Reader::new(r#" 0 0.01 123 128 -128 -129 255 -1 -1e+2 1e2 123e-7 0.0123e-10 1e-1000000 1e10000000000 "Infinity" "-Infinity" "hello" true "#.bytes());
 	assert_eq!(reader.read::<i16>().unwrap(), 0); // 0
 	assert_eq!(reader.read::<u16>().unwrap(), 0); // 0.01
 	assert_eq!(reader.read::<i8>().unwrap(), 123); // 123
@@ -19,14 +19,16 @@ fn test_number()
 	let n: f64 = reader.read().unwrap(); // 0.0123e-10
 	assert!(n > 0.0123e-10 - 0.1e-16 && n < 0.0123e-10 + 0.1e-16);
 	assert_eq!(reader.read::<f32>().unwrap(), 0.0); // 1e-1000000
-	assert!(reader.read::<f64>().is_err()); // 1e10000000000
-	assert_eq!(reader.read::<f64>().unwrap(), 0.0); // "hello"
+	assert!(reader.read::<f64>().unwrap().is_nan()); // 1e10000000000
+	assert!(reader.read::<f64>().unwrap().is_infinite()); // "Infinity"
+	assert!(reader.read::<f64>().unwrap().is_infinite()); // "-Infinity"
+	assert!(reader.read::<f64>().unwrap().is_nan()); // "hello"
 	assert_eq!(reader.read::<i16>().unwrap(), 1); // true
 }
 
 #[test]
 fn test_number_as_string()
-{	let mut reader = Reader::new(r#" "0" "0.01" "123" "128" "-128" "-129" "255" "-1" "-1e+2" "1e2" "123e-7" "0.0123e-10" "1e-1000000" "1e10000000000" "hello" true "#.as_bytes());
+{	let mut reader = Reader::new(r#" "0" "0.01" "123" "128" "-128" "-129" "255" "-1" "-1e+2" "1e2" "123e-7" "0.0123e-10" "1e-1000000" "1e10000000000" "Infinity" "-Infinity" "hello" true "#.bytes());
 	assert_eq!(reader.read::<i16>().unwrap(), 0); // 0
 	assert_eq!(reader.read::<u16>().unwrap(), 0); // 0.01
 	assert_eq!(reader.read::<i8>().unwrap(), 123); // 123
@@ -42,14 +44,16 @@ fn test_number_as_string()
 	let n: f64 = reader.read().unwrap(); // 0.0123e-10
 	assert!(n > 0.0123e-10 - 0.1e-16 && n < 0.0123e-10 + 0.1e-16);
 	assert_eq!(reader.read::<f32>().unwrap(), 0.0); // 1e-1000000
-	assert!(reader.read::<f64>().is_err()); // 1e10000000000
-	assert_eq!(reader.read::<f64>().unwrap(), 0.0); // "hello"
+	assert!(reader.read::<f64>().unwrap().is_nan()); // 1e10000000000
+	assert!(reader.read::<f64>().unwrap().is_infinite()); // "Infinity"
+	assert!(reader.read::<f64>().unwrap().is_infinite()); // "-Infinity"
+	assert!(reader.read::<f64>().unwrap().is_nan()); // "hello"
 	assert_eq!(reader.read::<i16>().unwrap(), 1); // true
 }
 
 #[test]
 fn test_number_to_string()
-{	let mut reader = Reader::new("123 12.3 0.123 0.0123 123e3 123e7 123e8 123e-1 123e-3 123e-13".as_bytes());
+{	let mut reader = Reader::new("123 12.3 0.123 0.0123 123e3 123e7 123e8 123e-1 123e-3 123e-13".bytes());
 	assert_eq!(reader.read::<String>().unwrap(), "123");
 	assert_eq!(reader.read::<String>().unwrap(), "12.3");
 	assert_eq!(reader.read::<String>().unwrap(), "0.123");
@@ -63,8 +67,23 @@ fn test_number_to_string()
 }
 
 #[test]
+fn test_value_number_to_string()
+{	let mut reader = Reader::new("123 12.3 0.123 0.0123 123e3 123e7 123e8 123e-1 123e-3 123e-13".bytes());
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "123");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "12.3");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "0.123");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "0.0123");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "123000");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "1230000000");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "123e8");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "12.3");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "0.123");
+	assert_eq!(reader.read::<Value>().unwrap().to_string(), "123e-13");
+}
+
+#[test]
 fn test_string()
-{	let mut reader = Reader::new(r#" "abc" "abcdefghijklmnopqrstuvwxyz" "שלום" "\u0061\u0062\u0063 \u05E9\u05Dc\u05d5\u05dd" "\\ \n" "#.as_bytes());
+{	let mut reader = Reader::new(r#" "abc" "abcdefghijklmnopqrstuvwxyz" "שלום" "\u0061\u0062\u0063 \u05E9\u05Dc\u05d5\u05dd" "\\ \n" "#.bytes());
 	assert_eq!(reader.read::<String>().unwrap(), "abc");
 	assert_eq!(reader.read::<String>().unwrap(), "abcdefghijklmnopqrstuvwxyz");
 	assert_eq!(reader.read::<String>().unwrap(), "שלום");
@@ -74,7 +93,7 @@ fn test_string()
 
 #[test]
 fn test_bytes()
-{	let mut reader = Reader::new(r#" "abc" "abcdefghijklmnopqrstuvwxyz" "שלום" "\u0061\u0062\u0063 \u05E9\u05Dc\u05d5\u05dd" "\\ \n" "#.as_bytes());
+{	let mut reader = Reader::new(r#" "abc" "abcdefghijklmnopqrstuvwxyz" "שלום" "\u0061\u0062\u0063 \u05E9\u05Dc\u05d5\u05dd" "\\ \n" "#.bytes());
 	assert_eq!(reader.read_bytes().unwrap(), b"abc");
 	assert_eq!(reader.read_bytes().unwrap(), b"abcdefghijklmnopqrstuvwxyz");
 	assert_eq!(reader.read_bytes().unwrap(), "שלום".as_bytes());
@@ -84,7 +103,7 @@ fn test_bytes()
 
 #[test]
 fn test_char()
-{	let mut reader = Reader::new(r#" "abc" "א" "\u05E9" "#.as_bytes());
+{	let mut reader = Reader::new(r#" "abc" "א" "\u05E9" "#.bytes());
 	assert_eq!(reader.read::<char>().unwrap(), 'a');
 	assert_eq!(reader.read::<char>().unwrap(), 'א');
 	assert_eq!(reader.read::<char>().unwrap(), 'ש');
@@ -144,7 +163,7 @@ fn test_object()
 			}
 		)
 	];
-	let mut reader = Reader::new(input.as_bytes());
+	let mut reader = Reader::new(input.bytes());
 	let subj_0: Vec<Subj> = reader.read().unwrap();
 	assert_eq!(subj_0, expected_result);
 
@@ -160,7 +179,7 @@ fn test_object()
 		]
 	"#;
 	let expected_result = vec![vec![Subj::Boots(40), Subj::Boots(41)]];
-	let mut reader = Reader::new(input.as_bytes());
+	let mut reader = Reader::new(input.bytes());
 	let subj_1: Vec<Vec<Subj>> = reader.read().unwrap();
 	assert_eq!(subj_1, expected_result);
 
@@ -189,7 +208,7 @@ fn test_object()
 			}
 		)
 	];
-	let mut reader = Reader::new(input.as_bytes());
+	let mut reader = Reader::new(input.bytes());
 	let obj_0: Vec<Obj> = reader.read().unwrap();
 	assert_eq!(obj_0, expected_result);
 
@@ -204,29 +223,29 @@ fn test_object()
 		]
 	"#;
 	let expected_result = vec![vec![Obj::Boots(40)], vec![Obj::Boots(41)]];
-	let mut reader = Reader::new(input.as_bytes());
+	let mut reader = Reader::new(input.bytes());
 	let obj_1: Vec<Vec<Obj>> = reader.read().unwrap();
 	assert_eq!(obj_1, expected_result);
 
 	// Serialize back
 
 	let input = format!("{:?}", subj_0);
-	let mut reader = Reader::new(input.as_bytes());
+	let mut reader = Reader::new(input.bytes());
 	let subj_0_back: Vec<Subj> = reader.read().unwrap();
 	assert_eq!(subj_0, subj_0_back);
 
 	let input = format!("{:?}", subj_1);
-	let mut reader = Reader::new(input.as_bytes());
+	let mut reader = Reader::new(input.bytes());
 	let subj_1_back: Vec<Vec<Subj>> = reader.read().unwrap();
 	assert_eq!(subj_1, subj_1_back);
 
 	let input = format!("{:?}", obj_0);
-	let mut reader = Reader::new(input.as_bytes());
+	let mut reader = Reader::new(input.bytes());
 	let obj_0_back: Vec<Obj> = reader.read().unwrap();
 	assert_eq!(obj_0, obj_0_back);
 
 	let input = format!("{:?}", obj_1);
-	let mut reader = Reader::new(input.as_bytes());
+	let mut reader = Reader::new(input.bytes());
 	let obj_1_back: Vec<Vec<Obj>> = reader.read().unwrap();
 	assert_eq!(obj_1, obj_1_back);
 }
@@ -241,7 +260,7 @@ fn test_escape()
 fn test_value()
 {	use std::convert::TryInto;
 
-	let mut reader = Reader::new(r#" 123 "#.as_bytes());
+	let mut reader = Reader::new(r#" 123 "#.bytes());
 	let v: Value = reader.read().unwrap();
 	let v: i32 = v.try_into().unwrap();
 	assert_eq!(v, 123);
@@ -292,7 +311,7 @@ fn test_pipe()
 
 	let mut writer = Writer {data: Vec::new(), n_parts: 0};
 
-	let mut reader = Reader::new(&data[..]);
+	let mut reader = Reader::new(data.into_iter());
 	reader.pipe_blob(&mut writer).unwrap();
 
 	assert_eq!(writer.data, expected_data);

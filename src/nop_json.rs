@@ -1,51 +1,516 @@
 pub use nop_json_derive::*;
-use crate::value::{Value, VALUE_NUM_MANTISSA_BYTES};
+use crate::value::Value;
 
 use std::{io, io::Write, char, fmt, borrow::Cow};
-use numtoa::NumToA;
 use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet, LinkedList, VecDeque};
+use std::convert::TryInto;
+use numtoa::NumToA;
 
-const VALUE_NUM_MANTISSA_BYTES_Z: [u8; VALUE_NUM_MANTISSA_BYTES] = [b'0'; VALUE_NUM_MANTISSA_BYTES];
 const READER_BUFFER_SIZE: usize = 128;
 const FORMAT_NUM_WIDTH: usize = 10;
 const FORMAT_NUM_WIDTH_Z: [u8; FORMAT_NUM_WIDTH] = [b'0'; FORMAT_NUM_WIDTH];
 const FORMAT_NUM_WIDTH_0Z: &[u8] = b"0.0000000000";
 const HEX_DIGITS: [u8; 16] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'A', b'B', b'C', b'D', b'E', b'F'];
 
-macro_rules! read_num
+macro_rules! read_int
 {	($self:expr, $T:ty, $is_unsigned:expr) =>
-	{	{	let (exponent, is_negative) = $self.read_number_parts()?;
-			if $is_unsigned && is_negative
-			{	return Err($self.format_error("Invalid JSON input: Couldn't convert negative number to unsigned type"));
-			}
-			if exponent < 0
-			{	let minus_exponent = exponent.wrapping_neg() as usize;
-				if minus_exponent >= $self.buffer_len
-				{	return Ok(0);
+	{	{	let mut is_in_string = false;
+			let mut c = $self.lookahead;
+			loop
+			{	match c
+				{	b' ' | b'\t' | b'\r' | b'\n' =>
+					{	c = $self.iter.next().ok_or_else(|| $self.format_error("Invalid JSON: unexpected end of input"))?;
+					}
+					b'n' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok(0);
+						}
+						if let Some(b'u') = $self.iter.next()
+						{	if let Some(b'l') = $self.iter.next()
+							{	if let Some(b'l') = $self.iter.next()
+								{	if let Some(c) = $self.iter.next()
+									{	if !c.is_ascii_alphanumeric() && c!=b'_'
+										{	$self.lookahead = c;
+											return Ok(0 as $T);
+										}
+									}
+									else
+									{	$self.lookahead = b' ';
+										return Ok(0 as $T);
+									}
+								}
+							}
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: unexpected identifier"));
+					}
+					b'f' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok(0);
+						}
+						if let Some(b'a') = $self.iter.next()
+						{	if let Some(b'l') = $self.iter.next()
+							{	if let Some(b's') = $self.iter.next()
+								{	if let Some(b'e') = $self.iter.next()
+									{	if let Some(c) = $self.iter.next()
+										{	if !c.is_ascii_alphanumeric() && c!=b'_'
+											{	$self.lookahead = c;
+												return Ok(0 as $T);
+											}
+										}
+										else
+										{	$self.lookahead = b' ';
+											return Ok(0 as $T);
+										}
+									}
+								}
+							}
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: unexpected identifier"));
+					}
+					b't' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok(0);
+						}
+						if let Some(b'r') = $self.iter.next()
+						{	if let Some(b'u') = $self.iter.next()
+							{	if let Some(b'e') = $self.iter.next()
+								{	if let Some(c) = $self.iter.next()
+									{	if !c.is_ascii_alphanumeric() && c!=b'_'
+										{	$self.lookahead = c;
+											return Ok(1 as $T);
+										}
+									}
+									else
+									{	$self.lookahead = b' ';
+										return Ok(1 as $T);
+									}
+								}
+							}
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: unexpected identifier"));
+					}
+					b'0'..=b'9' | b'-' | b'.' =>
+					{	let mut is_negative = false;
+						let mut exponent = 0i32;
+						let mut is_after_dot = false;
+						let mut result = 0 as $T;
+						let mut ten = 10 as $T;
+						let mut is_error = false;
+						if c == b'-'
+						{	is_negative = true;
+							c = $self.iter.next().ok_or_else(|| $self.format_error("Invalid JSON: unexpected end of input"))?;
+						}
+						loop
+						{	match c
+							{	b'0' =>
+								{	ten = ten.checked_mul(10).unwrap_or_else(|| {if !is_after_dot {is_error = true}; 0});
+								}
+								b'0'..= b'9' =>
+								{	if !is_after_dot
+									{	result = result.checked_mul(ten).unwrap_or_else(|| {is_error = true; 0});
+										result = result.checked_add(if $is_unsigned {(c - b'0') as $T} else {(b'0' as i8 - c as i8) as $T}).unwrap_or_else(|| {is_error = true; 0}); // if signed, make negative number (because wider range), and then negate (if not is_negative)
+										ten = 10 as $T;
+									}
+								}
+								b'.' => {is_after_dot = true}
+								b'e' | b'E' =>
+								{	c = $self.iter.next().ok_or_else(|| $self.format_error("Invalid JSON: unexpected end of input"))?;
+									let mut n_is_negative = false;
+									match c
+									{	b'+' => {c = b'0'}
+										b'-' => {c = b'0'; n_is_negative = true}
+										b'0' ..= b'9' => {}
+										_ =>
+										{	$self.lookahead = c;
+											if is_in_string
+											{	if c != b'"' {$self.skip_string()?} else {$self.lookahead = b' '};
+												return Ok(0);
+											}
+											return Err($self.format_error("Invalid JSON input: invalid number format"));
+										}
+									};
+									let mut n: i32 = 0;
+									loop
+									{	match c
+										{	b'0' =>
+											{	n = n.checked_mul(10).unwrap_or_else(|| {is_error = true; 0});
+											}
+											b'1'..=b'9' =>
+											{	n = n.checked_mul(10).and_then(|n| n.checked_add((c-b'0') as i32)).unwrap_or_else(|| {is_error = true; 0});
+											}
+											_ =>
+											{	$self.lookahead = c;
+												break;
+											}
+										}
+										if let Some(new_c) = $self.iter.next()
+										{	c = new_c;
+										}
+										else
+										{	$self.lookahead = b' ';
+											if is_in_string
+											{	return Err($self.format_error("Invalid JSON input: unexpected end of input"));
+											}
+											break;
+										}
+									}
+									exponent = if n_is_negative {-n} else {n};
+									break;
+								}
+								_ =>
+								{	$self.lookahead = c;
+									break;
+								}
+							}
+							if let Some(new_c) = $self.iter.next()
+							{	c = new_c;
+							}
+							else
+							{	$self.lookahead = b' ';
+								if is_in_string
+								{	return Err($self.format_error("Invalid JSON input: unexpected end of input"));
+								}
+								break;
+							}
+						}
+						if !is_after_dot && ten>(10 as $T)
+						{	result = result.checked_mul(ten / (10 as $T)).unwrap_or_else(|| {is_error = true; 0});
+						}
+						if exponent != 0
+						{	result = result.checked_mul((10 as $T).checked_pow(exponent as u32).unwrap_or_else(|| {is_error = true; 0})).unwrap_or_else(|| {is_error = true; 0});
+						}
+						if $is_unsigned
+						{	if is_negative
+							{	is_error = true;
+							}
+						}
+						else if !is_negative // i built negative number (see above), so make it nonnegative
+						{	result = result.checked_neg().unwrap_or_else(|| {is_error = true; 0});
+						}
+						if is_error
+						{	if is_in_string
+							{	if $self.lookahead!=b'"' {$self.skip_string()?} else {$self.lookahead = b' '};
+							}
+							return Err($self.number_error());
+						}
+						if is_in_string
+						{	let mut c = $self.lookahead;
+							$self.lookahead = b' ';
+							while c.is_ascii_whitespace()
+							{	match $self.iter.next()
+								{	Some(new_c) => c = new_c,
+									None => return Err($self.format_error("Invalid JSON: unexpected end of input"))
+								}
+							}
+							if c != b'"'
+							{	$self.skip_string()?;
+								return Ok(0);
+							}
+						}
+						return Ok(result);
+					}
+					b'"' =>
+					{	if !is_in_string
+						{	is_in_string = true;
+							c = $self.iter.next().ok_or_else(|| $self.format_error("Invalid JSON: unexpected end of input"))?;
+						}
+						else
+						{	$self.lookahead = b' ';
+							return Ok(0);
+						}
+					}
+					b'[' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok(0);
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: value must be number, not array"));
+					}
+					b'{' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok(0);
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: value must be number, not object"));
+					}
+					_ =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok(0);
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error_fmt(format_args!("Invalid JSON input: unexpected '{}'", String::from_utf8_lossy(&[c]))));
+					}
 				}
-				$self.buffer_len -= minus_exponent;
 			}
-			if $self.buffer_len == 0
-			{	return Ok(0);
-			}
-			let mut result = ($self.buffer[0] - b'0') as $T;
-			if !$is_unsigned && is_negative
-			{	result = result.wrapping_neg();
-				for c in (&$self.buffer[1 .. $self.buffer_len]).iter()
-				{	result = result.checked_mul(10).ok_or_else(|| $self.number_error())?;
-					result = result.checked_sub((c - b'0') as $T).ok_or_else(|| $self.number_error())?;
+		}
+	}
+}
+
+macro_rules! read_float
+{	($self:expr, $T:ty, $nan:expr, $infinity:expr, $neg_infinity:expr) =>
+	{	{	let mut is_in_string = false;
+			let mut c = $self.lookahead;
+			loop
+			{	match c
+				{	b' ' | b'\t' | b'\r' | b'\n' =>
+					{	c = $self.iter.next().ok_or_else(|| $self.format_error("Invalid JSON: unexpected end of input"))?;
+					}
+					b'n' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok($nan);
+						}
+						if let Some(b'u') = $self.iter.next()
+						{	if let Some(b'l') = $self.iter.next()
+							{	if let Some(b'l') = $self.iter.next()
+								{	if let Some(c) = $self.iter.next()
+									{	if !c.is_ascii_alphanumeric() && c!=b'_'
+										{	$self.lookahead = c;
+											return Ok(0 as $T);
+										}
+									}
+									else
+									{	$self.lookahead = b' ';
+										return Ok(0 as $T);
+									}
+								}
+							}
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: unexpected identifier"));
+					}
+					b'f' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok($nan);
+						}
+						if let Some(b'a') = $self.iter.next()
+						{	if let Some(b'l') = $self.iter.next()
+							{	if let Some(b's') = $self.iter.next()
+								{	if let Some(b'e') = $self.iter.next()
+									{	if let Some(c) = $self.iter.next()
+										{	if !c.is_ascii_alphanumeric() && c!=b'_'
+											{	$self.lookahead = c;
+												return Ok(0 as $T);
+											}
+										}
+										else
+										{	$self.lookahead = b' ';
+											return Ok(0 as $T);
+										}
+									}
+								}
+							}
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: unexpected identifier"));
+					}
+					b't' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok($nan);
+						}
+						if let Some(b'r') = $self.iter.next()
+						{	if let Some(b'u') = $self.iter.next()
+							{	if let Some(b'e') = $self.iter.next()
+								{	if let Some(c) = $self.iter.next()
+									{	if !c.is_ascii_alphanumeric() && c!=b'_'
+										{	$self.lookahead = c;
+											return Ok(1 as $T);
+										}
+									}
+									else
+									{	$self.lookahead = b' ';
+										return Ok(1 as $T);
+									}
+								}
+							}
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: unexpected identifier"));
+					}
+					b'0'..=b'9' | b'-' | b'.' =>
+					{	let mut is_negative = false;
+						let mut exponent = 0i32;
+						let mut is_after_dot = 0;
+						let mut result = 0 as $T;
+						let mut ten = 10 as $T;
+						let mut is_error = false;
+						if c == b'-'
+						{	is_negative = true;
+							c = $self.iter.next().ok_or_else(|| $self.format_error("Invalid JSON: unexpected end of input"))?;
+							if is_in_string && c==b'I' // -Infinity?
+							{	$self.read_string_contents_as_bytes()?;
+								if $self.buffer_len >= 7 && &$self.buffer[.. 7] == b"nfinity"
+								{	if $self.buffer_len > 7 || $self.buffer[7 .. $self.buffer_len].iter().position(|c| !c.is_ascii_whitespace()).is_none()
+									{	return Ok($neg_infinity);
+									}
+								}
+								return Ok($nan);
+							}
+						}
+						loop
+						{	match c
+							{	b'0' =>
+								{	exponent += is_after_dot;
+									ten *= 10 as $T;
+								}
+								b'0'..= b'9' =>
+								{	exponent += is_after_dot;
+									result *= ten;
+									result += (c - b'0') as $T;
+									ten = 10 as $T;
+								}
+								b'.' => {is_after_dot = -1}
+								b'e' | b'E' =>
+								{	c = $self.iter.next().ok_or_else(|| $self.format_error("Invalid JSON: unexpected end of input"))?;
+									let mut n_is_negative = false;
+									match c
+									{	b'+' => {c = b'0'}
+										b'-' => {c = b'0'; n_is_negative = true}
+										b'0' ..= b'9' => {}
+										_ =>
+										{	$self.lookahead = c;
+											if is_in_string
+											{	if c != b'"' {$self.skip_string()?} else {$self.lookahead = b' '};
+												return Ok($nan);
+											}
+											return Err($self.format_error("Invalid JSON input: invalid number format"));
+										}
+									};
+									let mut n: i32 = 0;
+									loop
+									{	match c
+										{	b'0' =>
+											{	n = n.checked_mul(10).unwrap_or_else(|| {is_error = true; 0});
+											}
+											b'1'..=b'9' =>
+											{	n = n.checked_mul(10).and_then(|n| n.checked_add((c-b'0') as i32)).unwrap_or_else(|| {is_error = true; 0});
+											}
+											_ =>
+											{	$self.lookahead = c;
+												break;
+											}
+										}
+										if let Some(new_c) = $self.iter.next()
+										{	c = new_c;
+										}
+										else
+										{	$self.lookahead = b' ';
+											if is_in_string
+											{	return Err($self.format_error("Invalid JSON input: unexpected end of input"));
+											}
+											break;
+										}
+									}
+									match exponent.checked_add(if n_is_negative {-n} else {n})
+									{	Some(new_exponent) => exponent = new_exponent,
+										None => is_error = true
+									}
+									break;
+								}
+								_ =>
+								{	$self.lookahead = c;
+									break;
+								}
+							}
+							if let Some(new_c) = $self.iter.next()
+							{	c = new_c;
+							}
+							else
+							{	$self.lookahead = b' ';
+								if is_in_string
+								{	return Err($self.format_error("Invalid JSON input: unexpected end of input"));
+								}
+								break;
+							}
+						}
+						if is_error
+						{	if is_in_string
+							{	if $self.lookahead!=b'"' {$self.skip_string()?} else {$self.lookahead = b' '};
+							}
+							return Ok($nan);
+						}
+						if is_after_dot==0 && ten>10.0
+						{	result *= ten / 10.0;
+						}
+						if exponent != 0
+						{	result *= (10 as $T).powi(exponent);
+						}
+						if is_negative
+						{	result = -result;
+						}
+						if is_in_string
+						{	let mut c = $self.lookahead;
+							$self.lookahead = b' ';
+							while c.is_ascii_whitespace()
+							{	match $self.iter.next()
+								{	Some(new_c) => c = new_c,
+									None => return Err($self.format_error("Invalid JSON: unexpected end of input"))
+								}
+							}
+							if c != b'"'
+							{	$self.skip_string()?;
+								return Ok($nan);
+							}
+						}
+						return Ok(result);
+					}
+					b'"' =>
+					{	if !is_in_string
+						{	is_in_string = true;
+							c = $self.iter.next().ok_or_else(|| $self.format_error("Invalid JSON: unexpected end of input"))?;
+						}
+						else
+						{	$self.lookahead = b' ';
+							return Ok($nan);
+						}
+					}
+					b'[' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok($nan);
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: value must be number, not array"));
+					}
+					b'{' =>
+					{	if is_in_string
+						{	$self.skip_string()?;
+							return Ok($nan);
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error("Invalid JSON input: value must be number, not object"));
+					}
+					_ =>
+					{	if is_in_string
+						{	if c == b'I'
+							{	$self.read_string_contents_as_bytes()?;
+								if $self.buffer_len >= 7 && &$self.buffer[.. 7] == b"nfinity"
+								{	if $self.buffer_len > 7 || $self.buffer[7 .. $self.buffer_len].iter().position(|c| !c.is_ascii_whitespace()).is_none()
+									{	return Ok($infinity);
+									}
+								}
+							}
+							else
+							{	$self.skip_string()?;
+							}
+							return Ok($nan);
+						}
+						$self.lookahead = b' ';
+						return Err($self.format_error_fmt(format_args!("Invalid JSON input: unexpected '{}'", String::from_utf8_lossy(&[c]))));
+					}
 				}
 			}
-			else
-			{	for c in (&$self.buffer[1 .. $self.buffer_len]).iter()
-				{	result = result.checked_mul(10).ok_or_else(|| $self.number_error())?;
-					result = result.checked_add((c - b'0') as $T).ok_or_else(|| $self.number_error())?;
-				}
-			}
-			if exponent > 0
-			{	result = result.checked_mul((10 as $T).checked_pow(exponent as u32).ok_or_else(|| $self.number_error())?).ok_or_else(|| $self.number_error())?
-			}
-			Ok(result)
 		}
 	}
 }
@@ -121,7 +586,7 @@ impl<T> OrDefault for Option<T> where T: OptionalDefault
 /// 	}
 /// }
 ///
-/// let mut reader = Reader::new(r#" {"from": 0, "to": 10}   {"from": 3, "to": -1} "#.as_bytes());
+/// let mut reader = Reader::new(r#" {"from": 0, "to": 10}   {"from": 3, "to": -1} "#.bytes());
 /// let obj_0: io::Result<FromTo> = reader.read();
 /// let obj_1: io::Result<FromTo> = reader.read();
 /// assert!(obj_0.is_ok());
@@ -156,7 +621,7 @@ impl<T> OkFromJson for T
 /// 	Nothing,
 /// }
 ///
-/// let mut reader = Reader::new(r#" {"type": "Point", "point": {"x": 0, "y": 0}} "#.as_bytes());
+/// let mut reader = Reader::new(r#" {"type": "Point", "point": {"x": 0, "y": 0}} "#.bytes());
 /// let obj: Geometry = reader.read().unwrap();
 /// assert_eq!(obj, Geometry::Point(Point {x: 0, y: 0}));
 /// ```
@@ -184,7 +649,7 @@ impl<T> OkFromJson for T
 /// 	Nothing,
 /// }
 ///
-/// let mut reader = Reader::new(r#" {"var": "pnt", "point": {"x": 0, "y": 0}} "#.as_bytes());
+/// let mut reader = Reader::new(r#" {"var": "pnt", "point": {"x": 0, "y": 0}} "#.bytes());
 /// let obj: Geometry = reader.read().unwrap();
 /// assert_eq!(obj, Geometry::Point(Point {x: 0, y: 0}));
 /// ```
@@ -203,7 +668,7 @@ impl<T> OkFromJson for T
 /// 	Nothing,
 /// }
 ///
-/// let mut reader = Reader::new(r#" {"point": {"x": 0, "y": 0}} "#.as_bytes());
+/// let mut reader = Reader::new(r#" {"point": {"x": 0, "y": 0}} "#.bytes());
 /// let obj: Geometry = reader.read().unwrap();
 /// assert_eq!(obj, Geometry::Point(Point {x: 0, y: 0}));
 /// ```
@@ -223,11 +688,11 @@ impl<T> OkFromJson for T
 /// 	Nothing,
 /// }
 ///
-/// let mut reader = Reader::new(r#" {"point": {"x": 0, "y": 0, "comments": "hello"}} "#.as_bytes());
+/// let mut reader = Reader::new(r#" {"point": {"x": 0, "y": 0, "comments": "hello"}} "#.bytes());
 /// let obj_0: Geometry = reader.read().unwrap();
 /// assert_eq!(obj_0, Geometry::Point(Point {x: 0, y: 0, comments: String::new()}));
 ///
-/// let mut reader = Reader::new(r#" {"point": {"x": 0, "y": 0}} "#.as_bytes());
+/// let mut reader = Reader::new(r#" {"point": {"x": 0, "y": 0}} "#.bytes());
 /// let obj_0: Geometry = reader.read().unwrap();
 /// assert_eq!(obj_0, Geometry::Point(Point {x: 0, y: 0, comments: String::new()}));
 /// ```
@@ -258,7 +723,7 @@ impl<T> OkFromJson for T
 /// struct Point {x: i32, y: i32}
 ///
 /// impl nop_json::TryFromJson for Point
-/// {	fn try_from_json<T>(reader: &mut nop_json::Reader<T>) -> std::io::Result<Self> where T: std::io::Read
+/// {	fn try_from_json<T>(reader: &mut nop_json::Reader<T>) -> std::io::Result<Self> where T: Iterator<Item=u8>
 /// 	{	use nop_json::OrDefault;
 /// 		use nop_json::OkFromJson;
 ///
@@ -287,117 +752,117 @@ impl<T> OkFromJson for T
 /// This implementation uses `reader.read_object_use_buffer()` which reads object keys to internal buffer which is 128 bytes, without memory allocation.
 /// You can use `reader.read_object()` instead. Also you can do different things in this implementation function.
 pub trait TryFromJson: Sized
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read;
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>;
 }
 
 impl TryFromJson for ()
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_and_discard()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_and_discard()}
 }
 
 impl TryFromJson for isize
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_isize()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_isize()}
 }
 
 impl TryFromJson for i128
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_i128()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_i128()}
 }
 
 impl TryFromJson for i64
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_i64()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_i64()}
 }
 
 impl TryFromJson for i32
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_i32()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_i32()}
 }
 
 impl TryFromJson for i16
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_i16()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_i16()}
 }
 
 impl TryFromJson for i8
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_i8()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_i8()}
 }
 
 impl TryFromJson for usize
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_usize()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_usize()}
 }
 
 impl TryFromJson for u128
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_u128()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_u128()}
 }
 
 impl TryFromJson for u64
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_u64()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_u64()}
 }
 
 impl TryFromJson for u32
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_u32()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_u32()}
 }
 
 impl TryFromJson for u16
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_u16()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_u16()}
 }
 
 impl TryFromJson for u8
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_u8()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_u8()}
 }
 
 impl TryFromJson for f64
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_f64()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_f64()}
 }
 
 impl TryFromJson for f32
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_f32()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_f32()}
 }
 
 impl TryFromJson for bool
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_bool()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_bool()}
 }
 
 impl TryFromJson for char
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_char()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_char()}
 }
 
 impl TryFromJson for String
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_string()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_string()}
 }
 
 impl TryFromJson for Value
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read {reader.read_value()}
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8> {reader.read_value()}
 }
 
 impl<U> TryFromJson for Box<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	Ok(Box::new(U::try_from_json(reader)?))
 	}
 }
 
 impl<U> TryFromJson for std::sync::RwLock<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	Ok(std::sync::RwLock::new(U::try_from_json(reader)?))
 	}
 }
 
 impl<U> TryFromJson for std::sync::Mutex<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	Ok(std::sync::Mutex::new(U::try_from_json(reader)?))
 	}
 }
 
 impl<U> TryFromJson for std::rc::Rc<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	Ok(std::rc::Rc::new(U::try_from_json(reader)?))
 	}
 }
 
 impl<U> TryFromJson for std::sync::Arc<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	Ok(std::sync::Arc::new(U::try_from_json(reader)?))
 	}
 }
 
 impl<U> TryFromJson for Option<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	if reader.get_next_char() != b'n'
 		{	Ok(Some(U::try_from_json(reader)?))
 		}
@@ -409,7 +874,7 @@ impl<U> TryFromJson for Option<U> where U: TryFromJson
 }
 
 impl<U> TryFromJson for Vec<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let mut result = Vec::new();
 		reader.read_array
 		(	|reader|
@@ -422,7 +887,7 @@ impl<U> TryFromJson for Vec<U> where U: TryFromJson
 }
 
 impl<U> TryFromJson for HashSet<U> where U: Eq + std::hash::Hash + TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let mut result = HashSet::new();
 		reader.read_array
 		(	|reader|
@@ -435,7 +900,7 @@ impl<U> TryFromJson for HashSet<U> where U: Eq + std::hash::Hash + TryFromJson
 }
 
 impl<U> TryFromJson for LinkedList<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let mut result = LinkedList::new();
 		reader.read_array
 		(	|reader|
@@ -448,7 +913,7 @@ impl<U> TryFromJson for LinkedList<U> where U: TryFromJson
 }
 
 impl<U> TryFromJson for VecDeque<U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let mut result = VecDeque::new();
 		reader.read_array
 		(	|reader|
@@ -461,7 +926,7 @@ impl<U> TryFromJson for VecDeque<U> where U: TryFromJson
 }
 
 impl<U> TryFromJson for BTreeSet<U> where U: std::cmp::Ord + TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let mut result = BTreeSet::new();
 		reader.read_array
 		(	|reader|
@@ -474,7 +939,7 @@ impl<U> TryFromJson for BTreeSet<U> where U: std::cmp::Ord + TryFromJson
 }
 
 impl<U> TryFromJson for HashMap<String, U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let mut result = HashMap::new();
 		reader.read_object
 		(	|reader, key|
@@ -487,7 +952,7 @@ impl<U> TryFromJson for HashMap<String, U> where U: TryFromJson
 }
 
 impl<U> TryFromJson for BTreeMap<String, U> where U: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let mut result = BTreeMap::new();
 		reader.read_object
 		(	|reader, key|
@@ -500,7 +965,7 @@ impl<U> TryFromJson for BTreeMap<String, U> where U: TryFromJson
 }
 
 impl<U, V> TryFromJson for (U, V) where U: TryFromJson, V: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let (a, b) = match reader.next_token()?
 		{	Token::Null => return Err(reader.format_error("Value must be array[2], not null")),
 			Token::False => return Err(reader.format_error("Value must be array[2], not boolean")),
@@ -559,7 +1024,7 @@ impl<U, V> TryFromJson for (U, V) where U: TryFromJson, V: TryFromJson
 }
 
 impl<U, V, W> TryFromJson for (U, V, W) where U: TryFromJson, V: TryFromJson, W: TryFromJson
-{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: io::Read
+{	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
 	{	let (a, b, c) = match reader.next_token()?
 		{	Token::Null => return Err(reader.format_error("Value must be array[3], not null")),
 			Token::False => return Err(reader.format_error("Value must be array[3], not boolean")),
@@ -692,9 +1157,11 @@ impl DebugToJson for Value
 		{	Value::Null => write!(f, "null"),
 			Value::Bool(v) => if v {write!(f, "true")} else {write!(f, "false")},
 			Value::Number(mantissa, exponent, is_negative) =>
-			{	let mut buffer = [0u8; READER_BUFFER_SIZE];
-				&mut buffer[0 .. VALUE_NUM_MANTISSA_BYTES].copy_from_slice(&mantissa);
-				let len = number_to_string(&mut buffer, VALUE_NUM_MANTISSA_BYTES, exponent, is_negative).map_err(|_| fmt::Error {})?;
+			{	let mut buffer = [0u8; 24];
+				let mantissa = mantissa.numtoa(10, &mut buffer);
+				let mut buffer = [0u8; READER_BUFFER_SIZE];
+				&mut buffer[0 .. mantissa.len()].copy_from_slice(&mantissa);
+				let len = number_to_string(&mut buffer, mantissa.len(), exponent, is_negative).map_err(|_| fmt::Error {})?;
 				write!(f, "{}", String::from_utf8_lossy(&buffer[0 .. len]))
 			},
 			Value::String(ref v) => write!(f, "\"{}\"", escape(v)),
@@ -999,7 +1466,7 @@ pub fn escape(s: &str) -> Cow<str>
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Token
-{	Null, False, True, Number(i32, bool), Quote, ArrayBegin, ArrayEnd, ObjectBegin, ObjectEnd, Comma, Colon
+{	Null, False, True, Number(i16, bool), Quote, ArrayBegin, ArrayEnd, ObjectBegin, ObjectEnd, Comma, Colon
 }
 
 enum PathItem
@@ -1007,7 +1474,7 @@ enum PathItem
 	Index(usize),
 }
 
-fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, mut exponent: i32, is_negative: bool) -> Result<usize, ()>
+fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, mut exponent: i16, is_negative: bool) -> Result<usize, ()>
 {	if len == 0
 	{	buffer[0] = b'0';
 		return Ok(1);
@@ -1016,7 +1483,7 @@ fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, mut e
 	if is_negative
 	{	if len == buffer.len()
 		{	len -= 1;
-			exponent += 1;
+			exponent = exponent.checked_add(1).ok_or(())?;
 		}
 		buffer.copy_within(0..len, 1);
 		buffer[0] = b'-';
@@ -1051,7 +1518,7 @@ fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, mut e
 	{	let exponent_str = exponent.numtoa(10, &mut buffer_2);
 		if len+1+exponent_str.len() > buffer.len()
 		{	let overflow = len+1+exponent_str.len() - buffer.len();
-			exponent = exponent.checked_add(overflow as i32).ok_or(())?;
+			exponent = exponent.checked_add(overflow as i16).ok_or(())?;
 			len -= overflow;
 		}
 		else
@@ -1064,24 +1531,75 @@ fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, mut e
 	}
 }
 
-pub struct Reader<T> where T: io::Read
+pub struct ReadToIterator<T> where T: io::Read
 {	reader: T,
-	lookahead: u8,
+}
+
+impl<T> ReadToIterator<T> where T: io::Read
+{	pub fn new(reader: T) -> Self
+	{	Self {reader}
+	}
+
+	pub fn unwrap(self) -> T
+	{	self.reader
+	}
+}
+
+impl<T> Iterator for ReadToIterator<T> where T: io::Read
+{	type Item = u8;
+
+	fn next(&mut self) -> Option<Self::Item>
+	{	let mut buffer = [0u8];
+		match self.reader.read(&mut buffer)
+		{	Ok(_) => Some(buffer[0]),
+			Err(_) => None,
+		}
+	}
+}
+
+pub struct Reader<T> where T: Iterator<Item=u8>
+{	iter: T,
+	pub lookahead: u8,
 	path: Vec<PathItem>,
 	last_index: usize,
 	buffer_len: usize,
 	buffer: [u8; READER_BUFFER_SIZE], // must be at least 48 bytes for correct number reading
 }
-impl<T> Reader<T> where T: io::Read
-{	pub fn new(reader: T) -> Reader<T>
+impl<T> Reader<T> where T: Iterator<Item=u8>
+{	/// Construct new reader object, that can read values from a JSON stream, passing an object that implements `Iterator<u8>`.
+	/// This allows to use `&str` as data source like this:
+	/// ```
+	/// # use nop_json::Reader;
+	/// let source = "\"Data\"";
+	/// let mut reader = Reader::new(source.bytes());
+	/// ```
+	/// To use `&[u8]` do this:
+	/// ```
+	/// # use nop_json::Reader;
+	/// let source: &[u8] = b"\"Data\"";
+	/// let mut reader = Reader::new(source.iter().map(|i| *i));
+	/// ```
+	/// To use `std::io::Read` as source, this crate has adapter object that converts `std::io::Read` to `Iterator<u8>`.
+	/// ```
+	/// use nop_json::{Reader, ReadToIterator};
+	/// let source = std::io::stdin();
+	/// let source = source.lock(); // this implements std::io::Read
+	/// let mut reader = Reader::new(ReadToIterator::new(source));
+	/// ```
+	pub fn new(iter: T) -> Reader<T>
 	{	Reader
-		{	reader,
+		{	iter,
 			lookahead: b' ',
 			path: Vec::new(),
 			last_index: 0,
 			buffer_len: 0,
 			buffer: [0u8; READER_BUFFER_SIZE],
 		}
+	}
+
+	/// Destroy this reader, unwrapping the underlying iterator.
+	pub fn unwrap(self) -> T
+	{	self.iter
 	}
 
 	pub fn read<U>(&mut self) -> io::Result<U> where U: TryFromJson
@@ -1134,50 +1652,83 @@ impl<T> Reader<T> where T: io::Read
 	}
 
 	fn get_next_char(&mut self) -> u8
-	{	let mut buffer = [0u8; 1];
-		while self.lookahead.is_ascii_whitespace()
-		{	match self.reader.read_exact(&mut buffer)
-			{	Ok(_) => self.lookahead = buffer[0],
-				Err(_) => self.lookahead = b' ',
+	{	while self.lookahead.is_ascii_whitespace()
+		{	match self.iter.next()
+			{	Some(c) => self.lookahead = c,
+				None => self.lookahead = b' ',
 			}
 		}
 		self.lookahead
 	}
 
 	fn next_token(&mut self) -> io::Result<Token>
-	{	let mut buffer = [0u8; 1];
-		buffer[0] = self.lookahead;
+	{	let mut c = self.lookahead;
 		loop
-		{	match buffer[0]
+		{	match c
 			{	b' ' | b'\t' | b'\r' | b'\n' =>
-				{	self.reader.read_exact(&mut buffer)?;
+				{	c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 				}
 				b'n' =>
-				{	let mut buffer = [b' '; 4];
-					let n = self.reader.read(&mut buffer)?;
-					if n<3 || buffer[0]!=b'u' || buffer[1]!=b'l' || buffer[2]!=b'l' || n==4 && (buffer[3].is_ascii_alphanumeric() || buffer[3]==b'_')
-					{	return Err(self.format_error("Invalid JSON input: unexpected identifier"));
+				{	if let Some(b'u') = self.iter.next()
+					{	if let Some(b'l') = self.iter.next()
+						{	if let Some(b'l') = self.iter.next()
+							{	if let Some(c) = self.iter.next()
+								{	if !c.is_ascii_alphanumeric() && c!=b'_'
+									{	self.lookahead = c;
+										return Ok(Token::Null);
+									}
+								}
+								else
+								{	self.lookahead = b' ';
+									return Ok(Token::Null);
+								}
+							}
+						}
 					}
-					self.lookahead = buffer[3];
-					return Ok(Token::Null);
+					self.lookahead = b' ';
+					return Err(self.format_error("Invalid JSON input: unexpected identifier"));
 				}
 				b'f' =>
-				{	let mut buffer = [b' '; 5];
-					let n = self.reader.read(&mut buffer)?;
-					if n<4 || buffer[0]!=b'a' || buffer[1]!=b'l' || buffer[2]!=b's' || buffer[3]!=b'e' || n==5 && (buffer[4].is_ascii_alphanumeric() || buffer[4]==b'_')
-					{	return Err(self.format_error("Invalid JSON input: unexpected identifier"));
+				{	if let Some(b'a') = self.iter.next()
+					{	if let Some(b'l') = self.iter.next()
+						{	if let Some(b's') = self.iter.next()
+							{	if let Some(b'e') = self.iter.next()
+								{	if let Some(c) = self.iter.next()
+									{	if !c.is_ascii_alphanumeric() && c!=b'_'
+										{	self.lookahead = c;
+											return Ok(Token::False);
+										}
+									}
+									else
+									{	self.lookahead = b' ';
+										return Ok(Token::False);
+									}
+								}
+							}
+						}
 					}
-					self.lookahead = buffer[4];
-					return Ok(Token::False);
+					self.lookahead = b' ';
+					return Err(self.format_error("Invalid JSON input: unexpected identifier"));
 				}
 				b't' =>
-				{	let mut buffer = [b' '; 4];
-					let n = self.reader.read(&mut buffer)?;
-					if n<3 || buffer[0]!=b'r' || buffer[1]!=b'u' || buffer[2]!=b'e' || n==4 && (buffer[3].is_ascii_alphanumeric() || buffer[3]==b'_')
-					{	return Err(self.format_error("Invalid JSON input: unexpected identifier"));
+				{	if let Some(b'r') = self.iter.next()
+					{	if let Some(b'u') = self.iter.next()
+						{	if let Some(b'e') = self.iter.next()
+							{	if let Some(c) = self.iter.next()
+								{	if !c.is_ascii_alphanumeric() && c!=b'_'
+									{	self.lookahead = c;
+										return Ok(Token::True);
+									}
+								}
+								else
+								{	self.lookahead = b' ';
+									return Ok(Token::True);
+								}
+							}
+						}
 					}
-					self.lookahead = buffer[3];
-					return Ok(Token::True);
+					self.lookahead = b' ';
+					return Err(self.format_error("Invalid JSON input: unexpected identifier"));
 				}
 				b'0'..=b'9' | b'-' | b'.' =>
 				{	let mut is_negative = false;
@@ -1185,13 +1736,12 @@ impl<T> Reader<T> where T: io::Read
 					let mut is_after_dot = 0;
 					let mut pos = 0;
 					let mut n_trailing_zeroes = 0;
-					if buffer[0] == b'-'
+					if c == b'-'
 					{	is_negative = true;
-						self.reader.read_exact(&mut buffer)?;
+						c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 					}
 					loop
-					{	let c = buffer[0];
-						match c
+					{	match c
 						{	b'0' =>
 							{	exponent += is_after_dot;
 								if pos > 0
@@ -1212,21 +1762,21 @@ impl<T> Reader<T> where T: io::Read
 							}
 							b'.' => {is_after_dot = -1}
 							b'e' | b'E' =>
-							{	self.reader.read_exact(&mut buffer)?;
+							{	c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 								let mut n_is_negative = false;
-								match buffer[0]
-								{	b'+' => {buffer[0] = b'0'}
-									b'-' => {buffer[0] = b'0'; n_is_negative = true}
+								match c
+								{	b'+' => {c = b'0'}
+									b'-' => {c = b'0'; n_is_negative = true}
 									b'0' ..= b'9' => {}
 									_ =>
-									{	self.lookahead = buffer[0];
+									{	self.lookahead = c;
 										return Err(self.format_error("Invalid JSON input: invalid number format"));
 									}
 								};
 								let mut n: i32 = 0;
 								let mut is_error = false;
 								loop
-								{	match buffer[0]
+								{	match c
 									{	b'0' =>
 										{	n = match n.checked_mul(10)
 											{	Some(n) => n,
@@ -1234,31 +1784,41 @@ impl<T> Reader<T> where T: io::Read
 											}
 										}
 										b'1'..=b'9' =>
-										{	n = match n.checked_mul(10).and_then(|n| n.checked_add((buffer[0]-b'0') as i32))
+										{	n = match n.checked_mul(10).and_then(|n| n.checked_add((c-b'0') as i32))
 											{	Some(n) => n,
 												None => {is_error = true; n_trailing_zeroes = 1; 0} // i check for error inside if n_trailing_zeroes (for optimization)
 											}
 										}
 										_ =>
-										{	self.lookahead = buffer[0];
+										{	self.lookahead = c;
 											break;
 										}
 									}
-									if self.reader.read(&mut buffer)? == 0
+									if let Some(new_c) = self.iter.next()
+									{	c = new_c;
+									}
+									else
 									{	self.lookahead = b' ';
 										break;
 									}
 								}
 								if n_trailing_zeroes > 0
 								{	if is_error
-									{	return Err(self.number_error());
+									{	self.lookahead = b' ';
+										return Err(self.number_error());
 									}
 									if is_after_dot == 0
 									{	exponent += n_trailing_zeroes;
 									}
 									pos -= n_trailing_zeroes as usize;
 								}
-								exponent = exponent.checked_add(if n_is_negative {-n} else {n}).ok_or_else(|| self.number_error())?;
+								match exponent.checked_add(if n_is_negative {-n} else {n})
+								{	Some(new_exponent) => exponent = new_exponent,
+									None =>
+									{	self.lookahead = b' ';
+										return Err(self.number_error());
+									}
+								}
 								break;
 							}
 							_ =>
@@ -1272,13 +1832,19 @@ impl<T> Reader<T> where T: io::Read
 								break;
 							}
 						}
-						if self.reader.read(&mut buffer)? == 0
+						if let Some(new_c) = self.iter.next()
+						{	c = new_c;
+						}
+						else
 						{	self.lookahead = b' ';
 							break;
 						}
 					}
 					self.buffer_len = pos;
-					return Ok(Token::Number(exponent, is_negative));
+					return match exponent.try_into()
+					{	Ok(exponent) => Ok(Token::Number(exponent, is_negative)),
+						Err(_) => Err(self.number_error())
+					};
 				}
 				b'"' =>
 				{	// no need for: self.lookahead = ... because i will call read_string_contents() or read_string_contents_as_bytes() or skip_string() then
@@ -1309,23 +1875,23 @@ impl<T> Reader<T> where T: io::Read
 					return Ok(Token::Colon);
 				}
 				_ =>
-				{	return Err(self.format_error("Invalid JSON input"));
+				{	self.lookahead = b' ';
+					return Err(self.format_error_fmt(format_args!("Invalid JSON input: unexpected '{}'", String::from_utf8_lossy(&[c]))));
 				}
 			}
 		}
 	}
 
 	fn skip_string(&mut self) -> io::Result<()>
-	{	let mut buffer = [0u8; 1];
+	{	self.lookahead = b' ';
 		loop
-		{	self.reader.read_exact(&mut buffer)?;
-			match buffer[0]
+		{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+			match c
 			{	b'"' =>
-				{	self.lookahead = b' ';
-					break;
+				{	break;
 				}
 				b'\\' =>
-				{	self.reader.read_exact(&mut buffer)?;
+				{	self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 				}
 				_ => {}
 			}
@@ -1334,9 +1900,11 @@ impl<T> Reader<T> where T: io::Read
 	}
 
 	fn u_escape_to_utf8(&mut self, buf_pos: usize) -> io::Result<usize>
-	{	let mut buffer = [0u8; 4];
-		self.reader.read_exact(&mut buffer)?;
-		let c = (self.hex_to_u32(buffer[0])? << 12) | (self.hex_to_u32(buffer[1])? << 8) | (self.hex_to_u32(buffer[2])? << 4) | self.hex_to_u32(buffer[3])?;
+	{	let c0 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+		let c1 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+		let c2 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+		let c3 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+		let c = (self.hex_to_u32(c0)? << 12) | (self.hex_to_u32(c1)? << 8) | (self.hex_to_u32(c2)? << 4) | self.hex_to_u32(c3)?;
 		if c <= 0x7F
 		{	if buf_pos == self.buffer.len()
 			{	Ok(0)
@@ -1369,10 +1937,13 @@ impl<T> Reader<T> where T: io::Read
 		}
 		else if c <= 0xDBFF
 		{	// UTF-16 surrogate pairs
-			self.reader.read_exact(&mut buffer)?;
-			let c2 = (self.hex_to_u32(buffer[0])? << 12) | (self.hex_to_u32(buffer[1])? << 8) | (self.hex_to_u32(buffer[2])? << 4) | self.hex_to_u32(buffer[3])?;
-			if c2 >= 0xDC00 && c2 <= 0xDFFF
-			{	let c = 0x10000 + (((c-0xD800) << 10) | (c2-0xDC00));
+			let c0 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+			let c1 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+			let c2 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+			let c3 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+			let cc = (self.hex_to_u32(c0)? << 12) | (self.hex_to_u32(c1)? << 8) | (self.hex_to_u32(c2)? << 4) | self.hex_to_u32(c3)?;
+			if cc >= 0xDC00 && cc <= 0xDFFF
+			{	let c = 0x10000 + (((c-0xD800) << 10) | (cc-0xDC00));
 				Ok((&mut self.buffer[buf_pos ..]).write(&[0xFFu8, (c >> 18) as u8, (0x80 | ((c >> 12) & 0x3F)) as u8, (0x80 | ((c >> 6) & 0x3F)) as u8, (0x80 | (c & 0x3F)) as u8]).unwrap())
 			}
 			else
@@ -1400,15 +1971,12 @@ impl<T> Reader<T> where T: io::Read
 
 	fn read_blob_contents(&mut self) -> io::Result<Vec<u8>>
 	{	let mut bytes = Vec::new();
-		let mut buffer = [0u8; 1];
 		loop
-		{	self.reader.read_exact(&mut buffer)?;
-			let c = buffer[0];
+		{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 			match c
 			{	b'"' => break,
 				b'\\' =>
-				{	self.reader.read_exact(&mut buffer)?;
-					let c = buffer[0];
+				{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 					match c
 					{	b'r' => bytes.push(b'\r'),
 						b'n' => bytes.push(b'\n'),
@@ -1431,18 +1999,15 @@ impl<T> Reader<T> where T: io::Read
 
 	fn read_string_contents_as_bytes(&mut self) -> io::Result<()>
 	{	let mut len = 0;
-		let mut buffer = [0u8; 1];
 		loop
-		{	self.reader.read_exact(&mut buffer)?;
-			let c = buffer[0];
+		{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 			match c
 			{	b'"' =>
 				{	self.lookahead = b' ';
 					break;
 				}
 				b'\\' =>
-				{	self.reader.read_exact(&mut buffer)?;
-					let c = buffer[0];
+				{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 					match c
 					{	b'r' =>
 						{	if len < self.buffer.len() {self.buffer[len] = b'\r'; len += 1}
@@ -1476,18 +2041,15 @@ impl<T> Reader<T> where T: io::Read
 
 	fn pipe_blob_contents<U>(&mut self, writer: &mut U) -> io::Result<()> where U: io::Write
 	{	let mut len = 0;
-		let mut buffer = [0u8; 1];
 		loop
-		{	self.reader.read_exact(&mut buffer)?;
-			let c = buffer[0];
+		{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 			let c = match c
 			{	b'"' =>
 				{	self.lookahead = b' ';
 					break;
 				}
 				b'\\' =>
-				{	self.reader.read_exact(&mut buffer)?;
-					let c = buffer[0];
+				{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 					match c
 					{	b'r' => b'\r',
 						b'n' => b'\n',
@@ -1661,9 +2223,8 @@ impl<T> Reader<T> where T: io::Read
 			Token::True => Ok(true),
 			Token::Number(_e, _n) => Ok(self.buffer_len != 0),
 			Token::Quote =>
-			{	let mut buffer = [0u8; 1];
-				self.reader.read_exact(&mut buffer)?;
-				if buffer[0] == b'"'
+			{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+				if c == b'"'
 				{	self.lookahead = b' ';
 					Ok(false)
 				}
@@ -1681,126 +2242,60 @@ impl<T> Reader<T> where T: io::Read
 		}
 	}
 
-	fn read_number_parts(&mut self) -> io::Result<(i32, bool)>
-	{	match self.next_token()?
-		{	Token::Null => {self.buffer[0] = b'0'; self.buffer_len = 1; Ok((0, false))},
-			Token::False => {self.buffer[0] = b'0'; self.buffer_len = 1; Ok((0, false))},
-			Token::True => {self.buffer[0] = b'1'; self.buffer_len = 1; Ok((0, false))},
-			Token::Number(exponent, is_negative) => Ok((exponent, is_negative)),
-			Token::Quote =>
-			{	let mut buffer = [0u8; 1];
-				self.reader.read_exact(&mut buffer)?;
-				self.lookahead = buffer[0];
-				if self.lookahead.is_ascii_digit() || self.lookahead==b'-' || self.lookahead==b'.'
-				{	let token = self.next_token();
-					if self.lookahead == b'"'
-					{	self.lookahead = b' ';
-					}
-					else
-					{	self.skip_string()?;
-					}
-					let (exponent, is_negative) = match token?
-					{	Token::Number(exponent, is_negative) => (exponent, is_negative),
-						_ => unreachable!()
-					};
-					Ok((exponent, is_negative))
-				}
-				else
-				{	self.skip_string()?;
-					self.buffer[0] = b'0';
-					self.buffer_len = 1;
-					Ok((0, false))
-				}
-			},
-			Token::ArrayBegin => {self.skip_array()?; self.buffer[0] = b'0'; self.buffer_len = 1; Ok((0, false))},
-			Token::ArrayEnd => Err(self.format_error("Invalid JSON input: unexpected ']'")),
-			Token::ObjectBegin => {self.skip_object()?; self.buffer[0] = b'0'; self.buffer_len = 1; Ok((0, false))},
-			Token::ObjectEnd => Err(self.format_error("Invalid JSON input: unexpected '}'")),
-			Token::Comma => Err(self.format_error("Invalid JSON input: unexpected ','")),
-			Token::Colon => Err(self.format_error("Invalid JSON input: unexpected ':'")),
-		}
-	}
-
 	fn read_isize(&mut self) -> io::Result<isize>
-	{	read_num!(self, isize, false)
+	{	read_int!(self, isize, false)
 	}
 
 	fn read_i128(&mut self) -> io::Result<i128>
-	{	read_num!(self, i128, false)
+	{	read_int!(self, i128, false)
 	}
 
 	fn read_i64(&mut self) -> io::Result<i64>
-	{	read_num!(self, i64, false)
+	{	read_int!(self, i64, false)
 	}
 
 	fn read_i32(&mut self) -> io::Result<i32>
-	{	read_num!(self, i32, false)
+	{	read_int!(self, i32, false)
 	}
 
 	fn read_i16(&mut self) -> io::Result<i16>
-	{	read_num!(self, i16, false)
+	{	read_int!(self, i16, false)
 	}
 
 	fn read_i8(&mut self) -> io::Result<i8>
-	{	read_num!(self, i8, false)
+	{	read_int!(self, i8, false)
 	}
 
 	fn read_usize(&mut self) -> io::Result<usize>
-	{	read_num!(self, usize, true)
+	{	read_int!(self, usize, true)
 	}
 
 	fn read_u128(&mut self) -> io::Result<u128>
-	{	read_num!(self, u128, true)
+	{	read_int!(self, u128, true)
 	}
 
 	fn read_u64(&mut self) -> io::Result<u64>
-	{	read_num!(self, u64, true)
+	{	read_int!(self, u64, true)
 	}
 
 	fn read_u32(&mut self) -> io::Result<u32>
-	{	read_num!(self, u32, true)
+	{	read_int!(self, u32, true)
 	}
 
 	fn read_u16(&mut self) -> io::Result<u16>
-	{	read_num!(self, u16, true)
+	{	read_int!(self, u16, true)
 	}
 
 	fn read_u8(&mut self) -> io::Result<u8>
-	{	read_num!(self, u8, true)
+	{	read_int!(self, u8, true)
 	}
 
 	fn read_f64(&mut self) -> io::Result<f64>
-	{	let (exponent, is_negative) = self.read_number_parts()?;
-		if self.buffer_len == 0
-		{	return Ok(0.0);
-		}
-		let mut result = (self.buffer[0] - b'0') as f64;
-		for c in (&self.buffer[1 .. self.buffer_len]).iter()
-		{	result *= 10.0;
-			result += (c - b'0') as f64;
-		}
-		if is_negative
-		{	result = -result;
-		}
-		result *= 10f64.powi(exponent);
-		Ok(result)
+	{	read_float!(self, f64, std::f64::NAN, std::f64::INFINITY, std::f64::NEG_INFINITY)
 	}
 
 	fn read_f32(&mut self) -> io::Result<f32>
-	{	let (exponent, is_negative) = self.read_number_parts()?;
-		if self.buffer_len == 0
-		{	return Ok(0.0);
-		}
-		let mut result = (self.buffer[0] - b'0') as f32;
-		for c in (&self.buffer[1 .. self.buffer_len]).iter()
-		{	result *= 10.0;
-			result += (c - b'0') as f32;
-		}
-		if is_negative
-		{	result = -result;
-		}
-		result *= 10f32.powi(exponent);
-		Ok(result)
+	{	read_float!(self, f32, std::f32::NAN, std::f32::INFINITY, std::f32::NEG_INFINITY)
 	}
 
 	fn read_and_discard(&mut self) -> io::Result<()>
@@ -1889,7 +2384,7 @@ impl<T> Reader<T> where T: io::Read
 	/// ```
 	/// use nop_json::Reader;
 	///
-	/// let mut reader = Reader::new(&b" \"\x80\x81\" "[..]);
+	/// let mut reader = Reader::new(b" \"\x80\x81\" ".iter().map(|i| *i));
 	///
 	/// let data = reader.read_blob().unwrap();
 	/// assert_eq!(data, b"\x80\x81");
@@ -2124,16 +2619,11 @@ impl<T> Reader<T> where T: io::Read
 		{	Token::Null => Ok(Value::Null),
 			Token::False => Ok(Value::Bool(false)),
 			Token::True => Ok(Value::Bool(true)),
-			Token::Number(mut exponent, is_negative) =>
-			{	let mut mantissa = [0; VALUE_NUM_MANTISSA_BYTES];
-				if self.buffer_len > VALUE_NUM_MANTISSA_BYTES
-				{	exponent += (self.buffer_len-VALUE_NUM_MANTISSA_BYTES) as i32;
-					mantissa.copy_from_slice(&self.buffer[0 .. VALUE_NUM_MANTISSA_BYTES]);
-				}
-				else
-				{	let fill = VALUE_NUM_MANTISSA_BYTES-self.buffer_len;
-					&mut mantissa[0 .. fill].copy_from_slice(&VALUE_NUM_MANTISSA_BYTES_Z[0 .. fill]);
-					&mut mantissa[fill ..].copy_from_slice(&self.buffer[0 .. self.buffer_len]);
+			Token::Number(exponent, is_negative) =>
+			{	let mut mantissa = 0u64;
+				for c in &self.buffer[.. self.buffer_len]
+				{	mantissa = mantissa.checked_mul(10).ok_or_else(|| self.number_error())?;
+					mantissa = mantissa.checked_add((*c - b'0') as u64).ok_or_else(|| self.number_error())?;
 				}
 				Ok(Value::Number(mantissa, exponent, is_negative))
 			},

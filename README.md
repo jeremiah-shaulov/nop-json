@@ -17,13 +17,17 @@ This implementation avoids unnecessary memory allocations and temporary object c
 
 [Documentation](https://docs.rs/nop-json/0.0.4/nop_json/)
 
-# Installation
+## Installation
 
 In `Cargo.toml` of your project add:
 ```toml
 [dependencies]
-nop-json = "0.0"
+nop-json = "1.0"
 ```
+
+## Change log
+
+Public API changed in version 1.0.0 over 0.0.4. Now `Reader::new()` accepts `Iterator<u8>`, because it works faster. See `Reader::new()` for how to use `io::Read`.
 
 ## Examples
 
