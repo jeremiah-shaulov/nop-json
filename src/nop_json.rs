@@ -111,7 +111,7 @@ macro_rules! read_int
 							{	b'0' =>
 								{	ten = ten.checked_mul(10).unwrap_or_else(|| {if !is_after_dot {is_error = true}; 0});
 								}
-								b'0'..= b'9' =>
+								b'1'..= b'9' =>
 								{	if !is_after_dot
 									{	result = result.checked_mul(ten).unwrap_or_else(|| {is_error = true; 0});
 										result = result.checked_add(if $is_unsigned {(c - b'0') as $T} else {(b'0' as i8 - c as i8) as $T}).unwrap_or_else(|| {is_error = true; 0}); // if signed, make negative number (because wider range), and then negate (if not is_negative)
@@ -364,7 +364,7 @@ macro_rules! read_float
 								{	exponent += is_after_dot;
 									ten *= 10 as $T;
 								}
-								b'0'..= b'9' =>
+								b'1'..= b'9' =>
 								{	exponent += is_after_dot;
 									result *= ten;
 									result += (c - b'0') as $T;
@@ -1559,7 +1559,7 @@ impl<T> Iterator for ReadToIterator<T> where T: io::Read
 
 pub struct Reader<T> where T: Iterator<Item=u8>
 {	iter: T,
-	pub lookahead: u8,
+	lookahead: u8,
 	path: Vec<PathItem>,
 	last_index: usize,
 	buffer_len: usize,

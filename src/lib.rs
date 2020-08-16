@@ -132,5 +132,5 @@ extern crate nop_json_derive;
 mod nop_json;
 mod value;
 
-pub use nop_json::{Reader, TryFromJson, DebugToJson, OrDefault, OkFromJson, escape, ReadToIterator};
+pub use crate::nop_json::{Reader, TryFromJson, DebugToJson, OrDefault, OkFromJson, escape, ReadToIterator};
 pub use value::Value;

@@ -1,6 +1,6 @@
 [package]
 name = "nop-json"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Jeremiah Shaulov <jeremiah.shaulov@gmail.com>"]
 edition = "2018"
 license = "MIT"
@@ -11,4 +11,4 @@ keywords = ["json"]
 
 [dependencies]
 numtoa = "0.2"
-nop-json-derive = "1.0"
+nop-json-derive = {path = "../nop-json-derive"}
