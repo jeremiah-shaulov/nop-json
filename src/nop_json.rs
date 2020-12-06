@@ -714,10 +714,13 @@ impl<T> OkFromJson for T
 /// 	}
 /// }
 /// ```
-/// Automatic implementation through `#[derive(TryFromJson)]` has 1 limitation: object key string must be not longer
-/// than 128 bytes, or it will be cut.
 ///
-/// Sometimes that can be different reasons to implement `TryFromJson` manually.
+/// ## Implementing TryFromJson manually
+///
+/// Automatic implementation through `#[derive(TryFromJson)]` has 1 limitation: object key string must be not longer
+/// than 128 bytes, or it will be truncated.
+///
+/// Sometimes there can be different reasons to implement `TryFromJson` manually.
 /// Let's see how the automatic implementation looks like.
 /// ```
 /// struct Point {x: i32, y: i32}
@@ -751,6 +754,39 @@ impl<T> OkFromJson for T
 /// ```
 /// This implementation uses `reader.read_object_use_buffer()` which reads object keys to internal buffer which is 128 bytes, without memory allocation.
 /// You can use `reader.read_object()` instead. Also you can do different things in this implementation function.
+///
+/// The automatic `TryFromJson` implementation generates JSON objects. If our struct is just a wrapper around a primitive type, we may wish to serialize it to a primitive type.
+///
+/// ```
+/// use std::{io, fmt};
+/// use nop_json::{Reader, TryFromJson, DebugToJson, escape};
+///
+/// #[derive(PartialEq)]
+/// struct Wrapper
+/// {	value: String,
+/// 	comment: String,
+/// }
+///
+/// impl TryFromJson for Wrapper
+/// {	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>
+/// 	{	reader.read::<String>().map(|value| Self {value, comment: Default::default()})
+/// 	}
+/// }
+/// impl DebugToJson for Wrapper
+/// {	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+/// 	{	write!(f, "\"{}\"", escape(&self.value))
+/// 	}
+/// }
+/// impl fmt::Debug for Wrapper
+/// {	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+/// 	{	DebugToJson::fmt(self, f)
+/// 	}
+/// }
+///
+/// let mut reader = Reader::new(r#" "the value" "#.bytes());
+/// let wrp: Wrapper = reader.read().unwrap();
+/// assert_eq!(wrp, Wrapper {value: "the value".to_string(), comment: "".to_string()});
+/// ```
 pub trait TryFromJson: Sized
 {	fn try_from_json<T>(reader: &mut Reader<T>) -> io::Result<Self> where T: Iterator<Item=u8>;
 }
@@ -1655,7 +1691,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	{	while self.lookahead.is_ascii_whitespace()
 		{	match self.iter.next()
 			{	Some(c) => self.lookahead = c,
-				None => self.lookahead = b' ',
+				None => break
 			}
 		}
 		self.lookahead
@@ -2216,6 +2252,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		Ok(())
 	}
 
+	/// Use read::<bool>() to read booleans.
 	fn read_bool(&mut self) -> io::Result<bool>
 	{	match self.next_token()?
 		{	Token::Null => Ok(false),
@@ -2242,58 +2279,72 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
+	/// Use read::<isize>() to read isize numbers.
 	fn read_isize(&mut self) -> io::Result<isize>
 	{	read_int!(self, isize, false)
 	}
 
+	/// Use read::<i128>() to read i128 numbers.
 	fn read_i128(&mut self) -> io::Result<i128>
 	{	read_int!(self, i128, false)
 	}
 
+	/// Use read::<i64>() to read i64 numbers.
 	fn read_i64(&mut self) -> io::Result<i64>
 	{	read_int!(self, i64, false)
 	}
 
+	/// Use read::<i32>() to read i32 numbers.
 	fn read_i32(&mut self) -> io::Result<i32>
 	{	read_int!(self, i32, false)
 	}
 
+	/// Use read::<i16>() to read i16 numbers.
 	fn read_i16(&mut self) -> io::Result<i16>
 	{	read_int!(self, i16, false)
 	}
 
+	/// Use read::<i8>() to read i8 numbers.
 	fn read_i8(&mut self) -> io::Result<i8>
 	{	read_int!(self, i8, false)
 	}
 
+	/// Use read::<usize>() to read usize numbers.
 	fn read_usize(&mut self) -> io::Result<usize>
 	{	read_int!(self, usize, true)
 	}
 
+	/// Use read::<u128>() to read u128 numbers.
 	fn read_u128(&mut self) -> io::Result<u128>
 	{	read_int!(self, u128, true)
 	}
 
+	/// Use read::<u64>() to read u64 numbers.
 	fn read_u64(&mut self) -> io::Result<u64>
 	{	read_int!(self, u64, true)
 	}
 
+	/// Use read::<u32>() to read u32 numbers.
 	fn read_u32(&mut self) -> io::Result<u32>
 	{	read_int!(self, u32, true)
 	}
 
+	/// Use read::<u16>() to read u16 numbers.
 	fn read_u16(&mut self) -> io::Result<u16>
 	{	read_int!(self, u16, true)
 	}
 
+	/// Use read::<u8>() to read u8 numbers.
 	fn read_u8(&mut self) -> io::Result<u8>
 	{	read_int!(self, u8, true)
 	}
 
+	/// Use read::<f64>() to read f64 numbers.
 	fn read_f64(&mut self) -> io::Result<f64>
 	{	read_float!(self, f64, std::f64::NAN, std::f64::INFINITY, std::f64::NEG_INFINITY)
 	}
 
+	/// Use read::<f32>() to read f32 numbers.
 	fn read_f32(&mut self) -> io::Result<f32>
 	{	read_float!(self, f32, std::f32::NAN, std::f32::INFINITY, std::f32::NEG_INFINITY)
 	}
@@ -2314,6 +2365,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
+	/// Use read::<String>() to read strings.
 	fn read_string(&mut self) -> io::Result<String>
 	{	match self.next_token()?
 		{	Token::Null => Ok("null".to_string()),
@@ -2630,20 +2682,25 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 			Token::Quote => Ok(Value::String(self.read_string_contents()?)),
 			Token::ArrayBegin =>
 			{	let mut vec = Vec::new();
-				loop
-				{	vec.push(self.read_value()?);
-					match self.next_token()?
-					{	Token::Null => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got null")),
-						Token::False => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got false")),
-						Token::True => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got true")),
-						Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got number")),
-						Token::Quote => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got string")),
-						Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '['")),
-						Token::ArrayEnd => break,
-						Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '{'")),
-						Token::ObjectEnd => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '}'")),
-						Token::Comma => {},
-						Token::Colon => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got ':'")),
+				if self.get_next_char() == b']'
+				{	self.lookahead = b' ';
+				}
+				else
+				{	loop
+					{	vec.push(self.read_value()?);
+						match self.next_token()?
+						{	Token::Null => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got null")),
+							Token::False => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got false")),
+							Token::True => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got true")),
+							Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got number")),
+							Token::Quote => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got string")),
+							Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '['")),
+							Token::ArrayEnd => break,
+							Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '{'")),
+							Token::ObjectEnd => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '}'")),
+							Token::Comma => {},
+							Token::Colon => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got ':'")),
+						}
 					}
 				}
 				Ok(Value::Array(vec))

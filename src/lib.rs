@@ -22,10 +22,6 @@
 //! nop-json = "1.0"
 //! ```
 //!
-//! # Change log
-//!
-//! Public API changed in version 1.0.0 over 0.0.4. Now `Reader::new()` accepts `Iterator<u8>`, because it works faster. See [Reader::new()](struct.Reader.html#method.new) for how to use `io::Read`.
-//!
 //! # Examples
 //!
 //! ## Deserializing simple values
@@ -47,12 +43,14 @@
 //! assert!(the_infinity.is_infinite());
 //! assert_eq!(the_array, vec![true, false]);
 //! ```
-//! First need to create a [Reader](struct.Reader.html) object giving it something that implements `std::io::Read`. In example above i use `&[u8]`.
+//! First need to create a [Reader](struct.Reader.html) object giving it something that implements `Iterator<Item=u8>`. In example above i use `"...".bytes()`.
 //!
 //! Then call reader.read() to read each value from stream to some variable that implements `TryFromJson`.
 //! This crate has implementation of `TryFromJson` for many primitive types, `Vec`, `HashMap`, and more.
 //!
 //! ## Deserializing any JSON values
+//!
+//! We have generic [Value](enum.Value.html) type that can hold any JSON node.
 //!
 //! ```
 //! use nop_json::{Reader, Value};
@@ -71,9 +69,20 @@
 //! assert_eq!(the_hello, Value::String("Hello".to_string()));
 //! assert_eq!(the_array, Value::Array(vec![Value::Bool(true), Value::Bool(false)]));
 //! ```
-//! We have generic [Value](enum.Value.html) type that can hold any JSON node.
+//! You can parse any JSON document to [Value](enum.Value.html).
 //!
-//! ## Deserializing/serializing objects
+//! ```
+//! use nop_json::{Reader, Value};
+//!
+//! let mut reader = Reader::new(r#" {"array": [{"x": 1}, "a string"]} "#.bytes());
+//! let doc: Value = reader.read().unwrap();
+//! assert_eq!(doc.to_string(), r#"{"array":[{"x":1},"a string"]}"#);
+//! ```
+//!
+//! ## Deserializing/serializing structs and enums
+//!
+//! To deserialize a struct or an enum, your struct needs to implement [TryFromJson](trait.TryFromJson.html) trait.
+//! To serialize - [DebugToJson](trait.DebugToJson.html).
 //!
 //! ```
 //! use nop_json::{Reader, TryFromJson, DebugToJson};
