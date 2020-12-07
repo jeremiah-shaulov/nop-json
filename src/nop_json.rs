@@ -1567,6 +1567,7 @@ fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, mut e
 	}
 }
 
+/// Deprecated. Please, use `read_iter` crate.
 pub struct ReadToIterator<T> where T: io::Read
 {	reader: T,
 }
@@ -1629,15 +1630,17 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	/// use nop_json::Reader;
 	/// let mut source = ReadIter::new(std::io::stdin());
 	/// let mut reader = Reader::new(&mut source);
+	/// // ...
 	/// source.take_last_error().unwrap();
 	/// ```
 	/// From file like this:
-	/// ```
+	/// ```no_run
 	/// use std::fs::File;
 	/// use read_iter::ReadIter;
 	/// use nop_json::Reader;
 	/// let mut source = ReadIter::new(File::open("/tmp/test.json").unwrap());
 	/// let mut reader = Reader::new(&mut source);
+	/// // ...
 	/// source.take_last_error().unwrap();
 	/// ```
 	pub fn new(iter: T) -> Reader<T>
@@ -1651,15 +1654,23 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
-	/// Destroy this reader, unwrapping the underlying iterator.
+	/// Destroy this reader, unwrapping the underlying iterator that was passed to constructor when this object created.
 	pub fn unwrap(self) -> T
 	{	self.iter
 	}
 
+	/// Read one JSON value from the stream.
+	///
+	/// The value will be converted to target variable type with [TryFromJson](trait.TryFromJson.html) trait.
+	/// The conversion is inspired by Javascript values conversion.
+	/// For example, a JSON string that represents a number (like "123.4e5") can be read to a numeric variable.
 	pub fn read<U>(&mut self) -> io::Result<U> where U: TryFromJson
 	{	U::try_from_json(self)
 	}
 
+	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
+	/// Use it when you read an object with [read_object()](struct.Reader.html#method.read_object) or [read_object_use_buffer()](struct.Reader.html#method.read_object_use_buffer).
+	/// It works like `read()`, but uses provided static string, that must be the name of the object property taht you are reading, in error message.
 	pub fn read_prop<U>(&mut self, prop: &'static str) -> io::Result<U> where U: TryFromJson
 	{	self.path.push(PathItem::Prop(prop));
 		let result = self.read();
@@ -1667,6 +1678,10 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		result
 	}
 
+	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
+	/// Use it when you read an array with [read_array()](struct.Reader.html#method.read_array).
+	/// It works like `read()`, but if error occures, the error message will contain index number in array.
+	/// The index number is stored internally, and is incremented each time you call `read_index()` (`read_array()` resets it).
 	pub fn read_index<U>(&mut self) -> io::Result<U> where U: TryFromJson
 	{	if let Some(p) = self.path.last_mut()
 		{	*p = PathItem::Index(self.last_index);
@@ -1686,6 +1701,9 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		s
 	}
 
+	/// Creates `std::io::Error` from given string.
+	/// The error message will be prefixed with current path in objects/arrays tree.
+	/// This path is built by [read_prop()](struct.Reader.html#method.read_prop) and [read_index()](struct.Reader.html#method.read_index).
 	pub fn format_error(&self, msg: &str) -> io::Error
 	{	let mut s = self.get_path_str();
 		s.push_str(": ");
@@ -1693,6 +1711,8 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		io::Error::new(io::ErrorKind::Other, s)
 	}
 
+	/// Like [format_error()](struct.Reader.html#method.format_error), but receives `std::fmt::Arguments` object.
+	/// Create it with `format_args!()`.
 	pub fn format_error_fmt(&self, args: fmt::Arguments) -> io::Error
 	{	let mut s = self.get_path_str();
 		s.push_str(": ");
@@ -2403,6 +2423,8 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
+	/// Reads a JSON string (numbers, booleans and null will be converted to string) to internal buffer, which is 128 bytes long.
+	/// And return a reference to the read bytes. Long strings will be truncated.
 	pub fn read_bytes(&mut self) -> io::Result<&[u8]>
 	{	match self.next_token()?
 		{	Token::Null =>
@@ -2475,6 +2497,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
+	/// Like [read_blob()](struct.Reader.html#method.read_blob), but pipes the data to the provided writer.
 	pub fn pipe_blob<U>(&mut self, writer: &mut U) -> io::Result<()> where U: io::Write
 	{	match self.next_token()?
 		{	Token::Null => Ok(()),
@@ -2521,6 +2544,41 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		return Err(self.format_error("Invalid UTF-8 string"));
 	}
 
+	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
+	/// This method reads a JSON object from the stream.
+	///
+	/// First it reads starting `{` char from the stream.
+	/// Then it reads a property name.
+	/// Then for each property name read, it calls given callback function, assuming that from this function you will read the property value, with [read_prop()](struct.Reader.html#method.read_prop).
+	/// Reading the value with [read()](struct.Reader.html#method.read) will also work (but in case of error, the error message will not contain path to the property where error occured).
+	///
+	/// Example:
+	/// ```
+	/// # use nop_json::Reader;
+	/// # fn main() -> std::io::Result<()> {
+	///
+	/// let mut reader = Reader::new(r#" {"x": 10, "y": "the y"} "#.bytes());
+	///
+	/// let mut x: Option<i32> = None;
+	/// let mut y = String::new();
+	///
+	/// reader.read_object
+	/// (	|reader, prop|
+	/// 	{	match prop.as_ref()
+	/// 		{	"x" => x = reader.read_prop("x")?,
+	/// 			"y" => y = reader.read_prop("y")?,
+	/// 			_ => return Err(reader.format_error_fmt(format_args!("Invalid property: {}", prop)))
+	/// 		}
+	/// 		Ok(())
+	/// 	}
+	/// )?;
+	///
+	/// assert_eq!(x, Some(10));
+	/// assert_eq!(y, "the y".to_string());
+	///
+	/// # Ok(())
+	/// # }
+	/// ```
 	pub fn read_object<F>(&mut self, mut on_value: F) -> io::Result<bool> where F: FnMut(&mut Self, String) -> io::Result<()>
 	{	match self.next_token()?
 		{	Token::Null => Ok(false),
@@ -2582,6 +2640,42 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
+	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
+	/// This method reads a JSON object from the stream.
+	///
+	/// First it reads starting `{` char from the stream.
+	/// Then it reads a property name, and stores it in internal buffer. You can get it with [get_key()](struct.Reader.html#method.get_key).
+	/// The buffer is 128 bytes long, so if the property name is longer, it will be truncated. To avoid this limitation, use [read_object()](struct.Reader.html#method.read_object).
+	/// Then for each property name read, it calls given callback function, assuming that from this function you will read the property value, with [read_prop()](struct.Reader.html#method.read_prop).
+	/// Reading the value with [read()](struct.Reader.html#method.read) will also work (but in case of error, the error message will not contain path to the property where error occured).
+	///
+	/// Example:
+	/// ```
+	/// # use nop_json::Reader;
+	/// # fn main() -> std::io::Result<()> {
+	///
+	/// let mut reader = Reader::new(r#" {"x": 10, "y": "the y"} "#.bytes());
+	///
+	/// let mut x: Option<i32> = None;
+	/// let mut y = String::new();
+	///
+	/// reader.read_object_use_buffer
+	/// (	|reader|
+	/// 	{	match reader.get_key()
+	/// 		{	b"x" => x = reader.read_prop("x")?,
+	/// 			b"y" => y = reader.read_prop("y")?,
+	/// 			_ => return Err(reader.format_error_fmt(format_args!("Invalid property: {}", String::from_utf8_lossy(reader.get_key()))))
+	/// 		}
+	/// 		Ok(())
+	/// 	}
+	/// )?;
+	///
+	/// assert_eq!(x, Some(10));
+	/// assert_eq!(y, "the y".to_string());
+	///
+	/// # Ok(())
+	/// # }
+	/// ```
 	pub fn read_object_use_buffer<F>(&mut self, mut on_value: F) -> io::Result<bool> where F: FnMut(&mut Self) -> io::Result<()>
 	{	match self.next_token()?
 		{	Token::Null => Ok(false),
@@ -2643,10 +2737,39 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
+	/// See [read_object_use_buffer()](struct.Reader.html#method.read_object_use_buffer).
 	pub fn get_key(&self) -> &[u8]
 	{	&self.buffer[0 .. self.buffer_len]
 	}
 
+	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
+	/// This method reads a JSON array from the stream.
+	///
+	/// First it reads starting `[` char from the stream.
+	/// Then it calls given callback function as many times as needed to read each value till terminating `]`.
+	/// The callback function is assumed to call [read_index()](struct.Reader.html#method.read_index) to read next array element.
+	///
+	/// Example:
+	/// ```
+	/// # use nop_json::Reader;
+	/// # fn main() -> std::io::Result<()> {
+	///
+	/// let mut reader = Reader::new(r#" ["One", "Two", "Three"] "#.bytes());
+	///
+	/// let mut value: Vec<String> = Vec::new();
+	///
+	/// reader.read_array
+	/// (	|reader|
+	/// 	{	value.push(reader.read_index()?);
+	/// 		Ok(())
+	/// 	}
+	/// )?;
+	///
+	/// assert_eq!(value, vec!["One".to_string(), "Two".to_string(), "Three".to_string()]);
+	///
+	/// # Ok(())
+	/// # }
+	/// ```
 	pub fn read_array<F>(&mut self, mut on_value: F) -> io::Result<bool> where F: FnMut(&mut Self) -> io::Result<()>
 	{	match self.next_token()?
 		{	Token::Null => Ok(false),
@@ -2655,25 +2778,30 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 			Token::Number(_e, _n) => Err(self.format_error("Value must be array, not number")),
 			Token::Quote => Err(self.format_error("Value must be array, not string")),
 			Token::ArrayBegin =>
-			{	self.path.push(PathItem::Index(0));
-				self.last_index = 0;
-				loop
-				{	on_value(self)?;
-					match self.next_token()?
-					{	Token::Null => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got null")),
-						Token::False => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got false")),
-						Token::True => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got true")),
-						Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got number")),
-						Token::Quote => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got string")),
-						Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '['")),
-						Token::ArrayEnd => break,
-						Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '{'")),
-						Token::ObjectEnd => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '}'")),
-						Token::Comma => {},
-						Token::Colon => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got ':'")),
-					}
+			{	if self.get_next_char() == b']'
+				{	self.lookahead = b' ';
 				}
-				self.path.pop();
+				else
+				{	self.path.push(PathItem::Index(0));
+					self.last_index = 0;
+					loop
+					{	on_value(self)?;
+						match self.next_token()?
+						{	Token::Null => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got null")),
+							Token::False => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got false")),
+							Token::True => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got true")),
+							Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got number")),
+							Token::Quote => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got string")),
+							Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '['")),
+							Token::ArrayEnd => break,
+							Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '{'")),
+							Token::ObjectEnd => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got '}'")),
+							Token::Comma => {},
+							Token::Colon => return Err(self.format_error("Invalid JSON input: expected ',' or ']', got ':'")),
+						}
+					}
+					self.path.pop();
+				}
 				Ok(true)
 			}
 			Token::ArrayEnd => Err(self.format_error("Invalid JSON input: unexpected ']'")),
