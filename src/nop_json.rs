@@ -1602,7 +1602,7 @@ pub struct Reader<T> where T: Iterator<Item=u8>
 	buffer: [u8; READER_BUFFER_SIZE], // must be at least 48 bytes for correct number reading
 }
 impl<T> Reader<T> where T: Iterator<Item=u8>
-{	/// Construct new reader object, that can read values from a JSON stream, passing an object that implements `Iterator<u8>`.
+{	/// Construct new reader object, that can read values from a JSON stream, passing an object that implements `Iterator<Item=u8>`.
 	/// This allows to use `&str` as data source like this:
 	/// ```
 	/// # use nop_json::Reader;
@@ -1615,12 +1615,30 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	/// let source: &[u8] = b"\"Data\"";
 	/// let mut reader = Reader::new(source.iter().map(|i| *i));
 	/// ```
-	/// To use `std::io::Read` as source, this crate has adapter object that converts `std::io::Read` to `Iterator<u8>`.
+	/// To use `std::io::Read` as source, you can convert it to `Iterator<Item=u8>` like this:
 	/// ```
-	/// use nop_json::{Reader, ReadToIterator};
+	/// use std::io::Read;
+	/// use nop_json::Reader;
 	/// let source = std::io::stdin();
 	/// let source = source.lock(); // this implements std::io::Read
-	/// let mut reader = Reader::new(ReadToIterator::new(source));
+	/// let mut reader = Reader::new(source.bytes().map(|b| b.unwrap()));
+	/// ```
+	/// Though, this will panic on i/o error. Another technique is to use `read_iter` crate.
+	/// ```
+	/// use read_iter::ReadIter;
+	/// use nop_json::Reader;
+	/// let mut source = ReadIter::new(std::io::stdin());
+	/// let mut reader = Reader::new(&mut source);
+	/// source.take_last_error().unwrap();
+	/// ```
+	/// From file like this:
+	/// ```
+	/// use std::fs::File;
+	/// use read_iter::ReadIter;
+	/// use nop_json::Reader;
+	/// let mut source = ReadIter::new(File::open("/tmp/test.json").unwrap());
+	/// let mut reader = Reader::new(&mut source);
+	/// source.take_last_error().unwrap();
 	/// ```
 	pub fn new(iter: T) -> Reader<T>
 	{	Reader

@@ -24,7 +24,34 @@
 //!
 //! # Examples
 //!
+//! ## Creating the Reader object
+//!
+//! First need to create a [Reader](struct.Reader.html) object giving it something that implements `Iterator<Item=u8>`.
+//! We can read from a string like this:
+//!
+//! ```
+//! use nop_json::Reader;
+//!
+//! let mut reader = Reader::new(r#" "a JSON string" "#.bytes());
+//! ```
+//!
+//! To read from a file we need to convert `std::io::Read` to `Iterator<Item=u8>`. We can use `read_iter` crate for this.
+//!
+//! ```no_run
+//! use std::fs::File;
+//! use read_iter::ReadIter; // also add dependency to Cargo.toml
+//! use nop_json::Reader;
+//!
+//! let mut file = ReadIter::new(File::open("/tmp/test.json").unwrap());
+//! let mut reader = Reader::new(&mut file);
+//! ```
+//!
+//! See [Reader::new()](struct.Reader.html#method.new) for more details.
+//!
 //! ## Deserializing simple values
+//!
+//! To read JSON values from the input stream, call `reader.read()` method, and assign the result to a variable that implements `TryFromJson` trait.
+//! This crate adds implementation of `TryFromJson` to many primitive types, `Vec`, `HashMap`, and more.
 //!
 //! ```
 //! use nop_json::Reader;
@@ -43,10 +70,6 @@
 //! assert!(the_infinity.is_infinite());
 //! assert_eq!(the_array, vec![true, false]);
 //! ```
-//! First need to create a [Reader](struct.Reader.html) object giving it something that implements `Iterator<Item=u8>`. In example above i use `"...".bytes()`.
-//!
-//! Then call reader.read() to read each value from stream to some variable that implements `TryFromJson`.
-//! This crate has implementation of `TryFromJson` for many primitive types, `Vec`, `HashMap`, and more.
 //!
 //! ## Deserializing any JSON values
 //!
@@ -69,6 +92,7 @@
 //! assert_eq!(the_hello, Value::String("Hello".to_string()));
 //! assert_eq!(the_array, Value::Array(vec![Value::Bool(true), Value::Bool(false)]));
 //! ```
+//!
 //! You can parse any JSON document to [Value](enum.Value.html).
 //!
 //! ```
