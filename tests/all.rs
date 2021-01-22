@@ -1,4 +1,4 @@
-use nop_json::{Reader, Value, TryFromJson, DebugToJson, escape};
+use nop_json::{Reader, Value, TryFromJson, DebugToJson, escape, escape_bytes};
 use std::io::Error;
 
 #[test]
@@ -253,7 +253,13 @@ fn test_object()
 #[test]
 fn test_escape()
 {	assert_eq!(escape("abc"), "abc");
-	assert_eq!(escape("a\\b\"c"), "a\\\\b\\\"c");
+	assert_eq!(escape("a\\b\"c\n"), "a\\\\b\\\"c\\n");
+}
+
+#[test]
+fn test_escape_bytes()
+{	assert_eq!(escape_bytes(b"abc").as_ref(), b"abc");
+	assert_eq!(escape_bytes(b"a\\b\"c\n").as_ref(), b"a\\\\b\\\"c\\n");
 }
 
 #[test]

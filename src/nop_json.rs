@@ -1439,62 +1439,76 @@ impl<U, V, W> DebugToJson for (U, V, W) where U: DebugToJson, V: DebugToJson, W:
 /// ```
 pub fn escape(s: &str) -> Cow<str>
 {	let bytes = s.as_bytes();
-	if let Some(mut pos) = bytes.iter().position(|c| match *c {b'"' | b'\\' | 0..=31 => true, _ => false})
-	{	let mut buffer = Vec::with_capacity(bytes.len() + 8);
-		let mut from = 0;
-		loop
-		{	buffer.extend_from_slice(&bytes[from .. pos]);
-			let c = bytes[pos];
-			if c >= 32
-			{	buffer.push(b'\\');
-				buffer.push(c);
-			}
-			else
-			{	match c
-				{	9 =>
-					{	buffer.push(b'\\');
-						buffer.push(b't');
-					}
-					13 =>
-					{	buffer.push(b'\\');
-						buffer.push(b'r');
-					}
-					10 =>
-					{	buffer.push(b'\\');
-						buffer.push(b'n');
-					}
-					8 =>
-					{	buffer.push(b'\\');
-						buffer.push(b'b');
-					}
-					12 =>
-					{	buffer.push(b'\\');
-						buffer.push(b'f');
-					}
-					_ =>
-					{	buffer.push(b'\\');
-						buffer.push(b'u');
-						buffer.push(b'0');
-						buffer.push(b'0');
-						buffer.push(HEX_DIGITS[(c >> 4) as usize]);
-						buffer.push(HEX_DIGITS[(c & 0xF) as usize]);
-					}
-				}
-			}
-			from = pos + 1;
-			if let Some(new_pos) = &bytes[from ..].iter().position(|c| match *c {b'"' | b'\\' | 0..=31 => true, _ => false})
-			{	pos = from + *new_pos;
-			}
-			else
-			{	buffer.extend_from_slice(&bytes[from .. ]);
-				break;
-			}
-		}
-		Cow::Owned(String::from_utf8(buffer).unwrap())
+	if let Some(pos) = bytes.iter().position(|c| match *c {b'"' | b'\\' | 0..=31 => true, _ => false})
+	{	Cow::Owned(String::from_utf8(do_escape_bytes(bytes, pos)).unwrap())
 	}
 	else
 	{	Cow::Borrowed(s)
 	}
+}
+
+/// Like [escape](fn.escape.html), but for `&[u8]`.
+pub fn escape_bytes(bytes: &[u8]) -> Cow<[u8]>
+{	if let Some(pos) = bytes.iter().position(|c| match *c {b'"' | b'\\' | 0..=31 => true, _ => false})
+	{	Cow::Owned(do_escape_bytes(bytes, pos))
+	}
+	else
+	{	Cow::Borrowed(bytes)
+	}
+}
+
+fn do_escape_bytes(bytes: &[u8], mut pos: usize) -> Vec<u8>
+{	let mut buffer = Vec::with_capacity(bytes.len() + 8);
+	let mut from = 0;
+	loop
+	{	buffer.extend_from_slice(&bytes[from .. pos]);
+		let c = bytes[pos];
+		if c >= 32
+		{	buffer.push(b'\\');
+			buffer.push(c);
+		}
+		else
+		{	match c
+			{	9 =>
+				{	buffer.push(b'\\');
+					buffer.push(b't');
+				}
+				13 =>
+				{	buffer.push(b'\\');
+					buffer.push(b'r');
+				}
+				10 =>
+				{	buffer.push(b'\\');
+					buffer.push(b'n');
+				}
+				8 =>
+				{	buffer.push(b'\\');
+					buffer.push(b'b');
+				}
+				12 =>
+				{	buffer.push(b'\\');
+					buffer.push(b'f');
+				}
+				_ =>
+				{	buffer.push(b'\\');
+					buffer.push(b'u');
+					buffer.push(b'0');
+					buffer.push(b'0');
+					buffer.push(HEX_DIGITS[(c >> 4) as usize]);
+					buffer.push(HEX_DIGITS[(c & 0xF) as usize]);
+				}
+			}
+		}
+		from = pos + 1;
+		if let Some(new_pos) = &bytes[from ..].iter().position(|c| match *c {b'"' | b'\\' | 0..=31 => true, _ => false})
+		{	pos = from + *new_pos;
+		}
+		else
+		{	buffer.extend_from_slice(&bytes[from .. ]);
+			break;
+		}
+	}
+	buffer
 }
 
 
