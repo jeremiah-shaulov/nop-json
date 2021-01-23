@@ -1,4 +1,4 @@
-use crate::nop_json::DebugToJson;
+use crate::debug_to_json::DebugToJson;
 
 use std::char;
 use std::fmt;

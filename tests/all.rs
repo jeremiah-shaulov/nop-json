@@ -1,5 +1,6 @@
 use nop_json::{Reader, Value, TryFromJson, DebugToJson, escape, escape_bytes};
 use std::io::Error;
+use std::f32;
 
 #[test]
 fn test_number()
@@ -322,4 +323,16 @@ fn test_pipe()
 
 	assert_eq!(writer.data, expected_data);
 	assert_eq!(writer.n_parts, (N_CHARS as f64 / READER_BUFFER_SIZE as f64).ceil() as usize);
+}
+
+#[test]
+fn test_to_json_string()
+{	assert_eq!(&0i16.to_json_string(), "0");
+	assert_eq!(&0.01f32.to_json_string(), "0.01");
+	assert_eq!(&123i8.to_json_string(), "123");
+	assert_eq!(&(-128i32).to_json_string(), "-128");
+	assert_eq!(&f32::INFINITY.to_json_string(), "\"Infinity\"");
+	assert_eq!(&true.to_json_string(), "true");
+	assert_eq!(&false.to_json_string(), "false");
+	assert_eq!(&" Hello ".to_string().to_json_string(), "\" Hello \"");
 }
