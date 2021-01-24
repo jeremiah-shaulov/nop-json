@@ -165,7 +165,9 @@ extern crate nop_json_derive;
 mod nop_json;
 mod value;
 mod debug_to_json;
+mod write_to_json;
 
 pub use crate::nop_json::{Reader, TryFromJson, OrDefault, OkFromJson, escape, escape_bytes, ReadToIterator};
 pub use crate::debug_to_json::DebugToJson;
+pub use crate::write_to_json::WriteToJson;
 pub use value::Value;

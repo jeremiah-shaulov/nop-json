@@ -1,5 +1,5 @@
-use nop_json::{Reader, Value, TryFromJson, DebugToJson, escape, escape_bytes};
-use std::io::Error;
+use nop_json::{Reader, Value, TryFromJson, DebugToJson, WriteToJson, escape, escape_bytes};
+use std::io::{self, Error};
 use std::f32;
 
 #[test]
@@ -113,142 +113,123 @@ fn test_char()
 #[test]
 fn test_object()
 {	#[derive(PartialEq, Default, TryFromJson, DebugToJson)]
-	struct Person
-	{	first_name: String,
-		last_name: String,
+	struct User
+	{	id: usize,
+		name: String,
+		#[json(all_posts)] posts: Vec<Post>,
 	}
 
+	#[derive(PartialEq, Default, TryFromJson, DebugToJson)]
+	struct Post
+	{	id: usize,
+		title: String,
+		is_published: bool,
+	}
+
+	// Test 1: Record (enum with type)
 	#[derive(PartialEq, TryFromJson, DebugToJson)]
-	struct Song
-	{	name: String,
-		year: i32,
-		#[json(special_artist)] artist: Person,
+	#[json(type)]
+	enum Record
+	{	#[json(user("user-data"))] User(User),
+		#[json("timestamp-data")] Timestamp(u32),
 	}
-
-	#[derive(PartialEq, TryFromJson, DebugToJson)]
-	#[json(what)]
-	enum Subj
-	{	#[json(sng(song))] Song(Song),
-		#[json("boots-size")] Boots(usize)
-	}
-
-	#[derive(PartialEq, TryFromJson, DebugToJson)]
-	enum Obj
-	{	#[json(song)] Song(Song),
-		#[json("boots-size")] Boots(usize)
-	}
-
-	// Test 1 (Subj)
 	let input =
-	r#"	[	{	"what": "sng",
-				"song":
-				{	"name": "Slow Dancing",
-					"year": 1985,
-					"special_artist":
-					{	"first_name": "Ramsey",
-						"last_name": "Lewis"
-					}
+	r#"	[	{	"type": "user",
+				"user-data":
+				{	"id": 1,
+					"name": "John",
+					"all_posts":
+					[	{	"id": "1",
+							"title": "Hello",
+							"is_published": true
+						},
+						{	"id": "2",
+							"title": "Subj",
+							"is_published": false
+						}
+					]
 				}
+			},
+			{	"type": "Timestamp",
+				"timestamp-data": 1611495933
 			}
 		]
 	"#;
 	let expected_result = vec!
-	[	Subj::Song
-		(	Song
-			{	name: "Slow Dancing".to_string(),
-				year: 1985,
-				artist: Person
-				{	first_name: "Ramsey".to_string(),
-					last_name: "Lewis".to_string(),
-				}
+	[	Record::User
+		(	User
+			{	id: 1,
+				name: "John".to_string(),
+				posts: vec!
+				[	Post
+					{	id: 1,
+						title: "Hello".to_string(),
+						is_published: true,
+					},
+					Post
+					{	id: 2,
+						title: "Subj".to_string(),
+						is_published: false,
+					},
+				]
 			}
-		)
+		),
+		Record::Timestamp(1611495933),
 	];
 	let mut reader = Reader::new(input.bytes());
-	let subj_0: Vec<Subj> = reader.read().unwrap();
+	let subj_0: Vec<Record> = reader.read().unwrap();
 	assert_eq!(subj_0, expected_result);
 
-	// Test 2 (Subj)
+	// Test 2: Record2 (enum without type)
+	#[derive(PartialEq, TryFromJson, DebugToJson)]
+	enum Record2
+	{	#[json(user)] User(User),
+		#[json("timestamp")] Timestamp(u32),
+	}
 	let input =
-	r#"	[	[	{	"what": "Boots",
-					"boots-size": 40
-				},
-				{	"what": "Boots",
-					"boots-size": 41
+	r#"	[	{	"user":
+				{	"id": 1,
+					"name": "John",
+					"all_posts":
+					[	{	"id": "1",
+							"title": "Hello",
+							"is_published": true
+						},
+						{	"id": "2",
+							"title": "Subj",
+							"is_published": false
+						}
+					]
 				}
-			]
-		]
-	"#;
-	let expected_result = vec![vec![Subj::Boots(40), Subj::Boots(41)]];
-	let mut reader = Reader::new(input.bytes());
-	let subj_1: Vec<Vec<Subj>> = reader.read().unwrap();
-	assert_eq!(subj_1, expected_result);
-
-	// Test 3 (Obj)
-	let input =
-	r#"	[	{	"song":
-				{	"name": "Slow Dancing",
-					"year": 1985,
-					"special_artist":
-					{	"first_name": "Ramsey",
-						"last_name": "Lewis"
-					}
-				}
+			},
+			{	"timestamp": 1611495933
 			}
 		]
 	"#;
 	let expected_result = vec!
-	[	Obj::Song
-		(	Song
-			{	name: "Slow Dancing".to_string(),
-				year: 1985,
-				artist: Person
-				{	first_name: "Ramsey".to_string(),
-					last_name: "Lewis".to_string(),
-				}
+	[	Record2::User
+		(	User
+			{	id: 1,
+				name: "John".to_string(),
+				posts: vec!
+				[	Post
+					{	id: 1,
+						title: "Hello".to_string(),
+						is_published: true,
+					},
+					Post
+					{	id: 2,
+						title: "Subj".to_string(),
+						is_published: false,
+					},
+				]
 			}
-		)
+		),
+		Record2::Timestamp(1611495933),
 	];
 	let mut reader = Reader::new(input.bytes());
-	let obj_0: Vec<Obj> = reader.read().unwrap();
-	assert_eq!(obj_0, expected_result);
-
-	// Test 4 (Obj)
-	let input =
-	r#"	[	[	{	"boots-size": 40
-				}
-			],
-			[	{	"boots-size": 41
-				}
-			]
-		]
-	"#;
-	let expected_result = vec![vec![Obj::Boots(40)], vec![Obj::Boots(41)]];
-	let mut reader = Reader::new(input.bytes());
-	let obj_1: Vec<Vec<Obj>> = reader.read().unwrap();
-	assert_eq!(obj_1, expected_result);
-
-	// Serialize back
-
-	let input = format!("{:?}", subj_0);
-	let mut reader = Reader::new(input.bytes());
-	let subj_0_back: Vec<Subj> = reader.read().unwrap();
-	assert_eq!(subj_0, subj_0_back);
-
-	let input = format!("{:?}", subj_1);
-	let mut reader = Reader::new(input.bytes());
-	let subj_1_back: Vec<Vec<Subj>> = reader.read().unwrap();
-	assert_eq!(subj_1, subj_1_back);
-
-	let input = format!("{:?}", obj_0);
-	let mut reader = Reader::new(input.bytes());
-	let obj_0_back: Vec<Obj> = reader.read().unwrap();
-	assert_eq!(obj_0, obj_0_back);
-
-	let input = format!("{:?}", obj_1);
-	let mut reader = Reader::new(input.bytes());
-	let obj_1_back: Vec<Vec<Obj>> = reader.read().unwrap();
-	assert_eq!(obj_1, obj_1_back);
+	let subj_0: Vec<Record2> = reader.read().unwrap();
+	assert_eq!(subj_0, expected_result);
 }
 
 #[test]
@@ -335,4 +316,47 @@ fn test_to_json_string()
 	assert_eq!(&true.to_json_string(), "true");
 	assert_eq!(&false.to_json_string(), "false");
 	assert_eq!(&" Hello ".to_string().to_json_string(), "\" Hello \"");
+}
+
+#[test]
+fn test_write()
+{	fn to_json<T>(input: T) -> String where T: WriteToJson<Vec<u8>>
+	{	let mut out: Vec<u8> = Vec::new();
+		input.write_to_json(&mut out).unwrap();
+		String::from_utf8_lossy(&out).into_owned()
+	}
+
+	// auto derive WriteToJson
+	#[derive(PartialEq, WriteToJson)]
+	struct Person<T>
+	{	first_name: T,
+		last_name: T,
+	}
+
+	// implement WriteToJson manually
+	#[derive(PartialEq)]
+	struct Person2
+	{	first_name: String,
+		last_name: String,
+	}
+	impl<W> WriteToJson<W> for Person2 where W: io::Write
+	{	fn write_to_json(&self, out: &mut W) -> io::Result<()>
+		{	write!(out, "{{\"first_name\":")?;
+			self.first_name.write_to_json(out)?;
+			write!(out, ",\"last_name\":")?;
+			self.last_name.write_to_json(out)?;
+			write!(out, "}}")
+		}
+	}
+
+	assert_eq!(&to_json(0i16), "0");
+	assert_eq!(&to_json(0.01f32), "0.01");
+	assert_eq!(&to_json(123i8), "123");
+	assert_eq!(&to_json(-128i32), "-128");
+	assert_eq!(&to_json(f32::INFINITY), "\"Infinity\"");
+	assert_eq!(&to_json(true), "true");
+	assert_eq!(&to_json(false), "false");
+	assert_eq!(&to_json(" Hello ".to_string()), "\" Hello \"");
+	assert_eq!(&to_json(Person {first_name: "John".to_string(), last_name: "Doe".to_string()}), "{\"first_name\":\"John\",\"last_name\":\"Doe\"}");
+	assert_eq!(&to_json(Person2 {first_name: "John".to_string(), last_name: "Doe".to_string()}), "{\"first_name\":\"John\",\"last_name\":\"Doe\"}");
 }
