@@ -311,7 +311,7 @@ impl<T> DebugToJson for BTreeMap<String, T> where T: DebugToJson
 	}
 }
 
-impl<U, V> DebugToJson for (U, V) where U: DebugToJson, V: DebugToJson
+impl<A, B> DebugToJson for (A, B) where A: DebugToJson, B: DebugToJson
 {	fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result
 	{	write!(out, "[")?;
 		DebugToJson::fmt(&self.0, out)?;
@@ -321,7 +321,7 @@ impl<U, V> DebugToJson for (U, V) where U: DebugToJson, V: DebugToJson
 	}
 }
 
-impl<U, V, W> DebugToJson for (U, V, W) where U: DebugToJson, V: DebugToJson, W: DebugToJson
+impl<A, B, C> DebugToJson for (A, B, C) where A: DebugToJson, B: DebugToJson, C: DebugToJson
 {	fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result
 	{	write!(out, "[")?;
 		DebugToJson::fmt(&self.0, out)?;
