@@ -1,4 +1,4 @@
-use nop_json::{Reader, Value, TryFromJson, DebugToJson, WriteToJson, escape, escape_bytes};
+use nop_json::{Reader, Value, TryFromJson, ValidateJson, DebugToJson, WriteToJson, escape, escape_bytes};
 use std::io::{self, Error};
 use std::f32;
 
@@ -112,14 +112,14 @@ fn test_char()
 
 #[test]
 fn test_object()
-{	#[derive(PartialEq, Default, TryFromJson, DebugToJson)]
+{	#[derive(PartialEq, Default, TryFromJson, ValidateJson, DebugToJson)]
 	struct User
 	{	id: usize,
 		name: String,
 		#[json(all_posts)] posts: Vec<Post>,
 	}
 
-	#[derive(PartialEq, Default, TryFromJson, DebugToJson)]
+	#[derive(PartialEq, Default, TryFromJson, ValidateJson, DebugToJson)]
 	struct Post
 	{	id: usize,
 		title: String,
@@ -127,7 +127,7 @@ fn test_object()
 	}
 
 	// Test 1: Record (enum with type)
-	#[derive(PartialEq, TryFromJson, DebugToJson)]
+	#[derive(PartialEq, TryFromJson, ValidateJson, DebugToJson)]
 	#[json(type)]
 	enum Record
 	{	#[json(user("user-data"))] User(User),
@@ -181,7 +181,7 @@ fn test_object()
 	assert_eq!(subj_0, expected_result);
 
 	// Test 2: Record2 (enum without type)
-	#[derive(PartialEq, TryFromJson, DebugToJson)]
+	#[derive(PartialEq, TryFromJson, ValidateJson, DebugToJson)]
 	enum Record2
 	{	#[json(user)] User(User),
 		#[json("timestamp")] Timestamp(u32),

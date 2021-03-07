@@ -515,52 +515,6 @@ macro_rules! read_float
 	}
 }
 
-// pub OptionalDefault (i only wanted to export OrDefault, but compiler wants me to export this as well)
-
-pub trait OptionalDefault: Sized
-{	fn optional_default() -> Option<Self>;
-}
-impl<T> OptionalDefault for T
-{	default fn optional_default() -> Option<Self>
-	{	None
-	}
-}
-impl<T> OptionalDefault for T where T: Default
-{	fn optional_default() -> Option<Self>
-	{	Some(Self::default())
-	}
-}
-
-
-/// This is like std::default::Default, but optional. I auto-implement this trait for Option<T> for all types.
-/// Types that implement std::default::Default return Some(default), and others return None.
-/// I need this to provide default value for omitted fields during JSON deserialization.
-///
-/// # Examples
-///
-/// ```
-/// use nop_json::OrDefault;
-///
-/// #[derive(PartialEq, Debug)]
-/// struct NoFallback {x: i32, y: i32}
-///
-/// #[derive(PartialEq, Debug, Default)]
-///	struct Fallback {x: i32, y: i32}
-///
-/// let no: Option<NoFallback> = None;
-/// let yes: Option<Fallback> = None;
-/// assert_eq!(no.or_default(), None);
-/// assert_eq!(yes.or_default(), Some(Fallback {x: 0, y: 0}));
-/// ```
-pub trait OrDefault
-{	fn or_default(self) -> Self;
-}
-impl<T> OrDefault for Option<T> where T: OptionalDefault
-{	fn or_default(self) -> Self
-	{	self.or_else(|| T::optional_default())
-	}
-}
-
 
 /// I auto-implement this trait for all types. During deserialization process, you may want to complain
 /// on invalid fields combination. I call ok_from_json() right after i deserialized some object with `#[derive(TryFromJson)]`.
@@ -575,8 +529,8 @@ impl<T> OrDefault for Option<T> where T: OptionalDefault
 /// #[derive(TryFromJson, Debug)]
 /// struct FromTo {from: i32, to: i32}
 ///
-/// impl FromTo
-/// {	fn ok_from_json(self) -> Result<Self, String>
+/// impl nop_json::ValidateJson for FromTo
+/// {	fn validate_json(self) -> Result<Self, String>
 /// 	{	if self.from <= self.to
 /// 		{	Ok(self)
 /// 		}
@@ -592,28 +546,26 @@ impl<T> OrDefault for Option<T> where T: OptionalDefault
 /// assert!(obj_0.is_ok());
 /// assert!(obj_1.is_err());
 /// ```
-pub trait OkFromJson: Sized
-{	fn ok_from_json(self) -> Result<Self, String>;
-}
-impl<T> OkFromJson for T
-{	default fn ok_from_json(self) -> Result<Self, String>
+pub trait ValidateJson: Sized
+{	fn validate_json(self) -> Result<Self, String>
 	{	Ok(self)
 	}
 }
 
 
-/// Implementing this trait makes possible to any type (except unions) to be JSON deserializable. The common technique
-/// to implement this trait is automatically through `#[derive(TryFromJson)]`.
+/// Implementing this trait makes possible for any type (except unions) to be JSON deserializable. The common technique
+/// to implement this trait is automatically through `#[derive(TryFromJson)]`. Every type that implements `TryFromJson`
+/// must also implement [ValidateJson](trait.ValidateJson.html). And every deserializable field must implement `Default`.
 ///
 /// # Examples
 ///
 /// ```
-/// use nop_json::{Reader, TryFromJson, DebugToJson};
+/// use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
 ///
-/// #[derive(TryFromJson, DebugToJson, PartialEq)]
+/// #[derive(Default, TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 /// struct Point {x: i32, y: i32}
 ///
-/// #[derive(TryFromJson, DebugToJson, PartialEq)]
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 /// #[json(type)]
 /// enum Geometry
 /// {	#[json(point)] Point(Point),
@@ -636,12 +588,12 @@ impl<T> OkFromJson for T
 ///
 /// Variant name is printed as it's called in enum ("Point", "Circle", "Nothing"). We can rename them if specify `#[json(variant_name(field_name_0, field_name_1, ...))]`.
 /// ```
-/// use nop_json::{Reader, TryFromJson, DebugToJson};
+/// use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
 ///
-/// #[derive(TryFromJson, DebugToJson, PartialEq)]
+/// #[derive(Default, TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 /// struct Point {x: i32, y: i32}
 ///
-/// #[derive(TryFromJson, DebugToJson, PartialEq)]
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 /// #[json(var)]
 /// enum Geometry
 /// {	#[json(pnt(point))] Point(Point),
@@ -656,12 +608,12 @@ impl<T> OkFromJson for T
 /// There's also another option: to choose variant according to content. To do so, we ommit `#[json(...)]` at enum level.
 /// This is only possible if variants have non-overlapping members.
 /// ```
-/// use nop_json::{Reader, TryFromJson, DebugToJson};
+/// use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
 ///
-/// #[derive(TryFromJson, DebugToJson, PartialEq)]
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 /// struct Point {x: i32, y: i32}
 ///
-/// #[derive(TryFromJson, DebugToJson, PartialEq)]
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 /// enum Geometry
 /// {	#[json(point)] Point(Point),
 /// 	#[json(cx, cy, r)] Circle(i32, i32, i32),
@@ -676,12 +628,12 @@ impl<T> OkFromJson for T
 /// To exclude a field from deserialization, and use default value for it, specify empty name (`#[json("")]`).
 ///
 /// ```
-/// use nop_json::{Reader, TryFromJson, DebugToJson};
+/// use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
 ///
-/// #[derive(TryFromJson, DebugToJson, PartialEq)]
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 /// struct Point {x: i32, y: i32, #[json("")] comments: String}
 ///
-/// #[derive(TryFromJson, DebugToJson, PartialEq)]
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 /// enum Geometry
 /// {	#[json(point)] Point(Point),
 /// 	#[json(cx, cy, r)] Circle(i32, i32, i32),
@@ -696,15 +648,15 @@ impl<T> OkFromJson for T
 /// let obj_0: Geometry = reader.read().unwrap();
 /// assert_eq!(obj_0, Geometry::Point(Point {x: 0, y: 0, comments: String::new()}));
 /// ```
-/// It's possible to validate object right after deserialization. To do so implement `ok_from_json()` function.
+/// It's possible to validate object right after deserialization. To do so implement [ValidateJson](trait.ValidateJson.html).
 /// ```
-/// use nop_json::{Reader, TryFromJson};
+/// use nop_json::{Reader, TryFromJson, ValidateJson};
 ///
 /// #[derive(TryFromJson, Debug)]
 /// struct FromTo {from: i32, to: i32}
 ///
-/// impl FromTo
-/// {	fn ok_from_json(self) -> Result<Self, String>
+/// impl ValidateJson for FromTo
+/// {	fn validate_json(self) -> Result<Self, String>
 /// 	{	if self.from <= self.to
 /// 		{	Ok(self)
 /// 		}
@@ -713,6 +665,13 @@ impl<T> OkFromJson for T
 /// 		}
 /// 	}
 /// }
+///
+/// let mut reader = Reader::new(r#" {"from": 1, "to": 2}  {"from": 2, "to": 1} "#.bytes());
+/// let from_to_1_2: Result<FromTo, std::io::Error> = reader.read();
+/// let from_to_2_1: Result<FromTo, std::io::Error> = reader.read();
+/// assert!(from_to_1_2.is_ok());
+/// assert!(from_to_2_1.is_err());
+///
 /// ```
 ///
 /// ## Implementing TryFromJson manually
@@ -721,16 +680,17 @@ impl<T> OkFromJson for T
 /// than 128 bytes, or it will be truncated.
 ///
 /// Sometimes there can be different reasons to implement `TryFromJson` manually.
-/// Let's see how the automatic implementation looks like.
+/// Let's see what the automatic implementation does expand to.
 /// ```
+/// use nop_json::{Reader, TryFromJson, ValidateJson};
+///
 /// struct Point {x: i32, y: i32}
 ///
-/// impl nop_json::TryFromJson for Point
-/// {	fn try_from_json<T>(reader: &mut nop_json::Reader<T>) -> std::io::Result<Self> where T: Iterator<Item=u8>
-/// 	{	use nop_json::OrDefault;
-/// 		use nop_json::OkFromJson;
+/// impl ValidateJson for Point {}
 ///
-/// 		let mut x = None;
+/// impl TryFromJson for Point
+/// {	fn try_from_json<T>(reader: &mut Reader<T>) -> std::io::Result<Self> where T: Iterator<Item=u8>
+/// 	{	let mut x = None;
 /// 		let mut y = None;
 ///
 /// 		reader.read_object_use_buffer
@@ -745,15 +705,15 @@ impl<T> OkFromJson for T
 /// 		)?;
 ///
 /// 		let result = Self
-/// 		{	x: x.or_default().ok_or_else(|| reader.format_error("Member \"x\" doesn't have default value. To make optional #[derive(Default)]"))?,
-/// 			y: y.or_default().ok_or_else(|| reader.format_error("Member \"y\" doesn't have default value. To make optional #[derive(Default)]"))?,
+/// 		{	x: x.unwrap_or_default(),
+/// 			y: y.unwrap_or_default(),
 /// 		};
-/// 		result.ok_from_json().map_err(|msg| reader.format_error(&msg))
+/// 		result.validate_json().map_err(|msg| reader.format_error(&msg))
 /// 	}
 /// }
 /// ```
-/// This implementation uses `reader.read_object_use_buffer()` which reads object keys to internal buffer which is 128 bytes, without memory allocation.
-/// You can use `reader.read_object()` instead. Also you can do different things in this implementation function.
+/// This implementation uses [read_object_use_buffer()](struct.Reader.html#method.read_object_use_buffer) which reads object keys to internal buffer which is 128 bytes, without memory allocation.
+/// You can use [read_object()](struct.Reader.html#method.read_object) instead to read keys longer than 128 bytes. Also you can do different things in this implementation function.
 ///
 /// The automatic `TryFromJson` implementation generates JSON objects. If our struct is just a wrapper around a primitive type, we may wish to serialize it to a primitive type.
 ///
@@ -1296,33 +1256,6 @@ pub fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, m
 	}
 }
 
-/// Deprecated. Please, use `read_iter` crate.
-pub struct ReadToIterator<T> where T: io::Read
-{	reader: T,
-}
-
-impl<T> ReadToIterator<T> where T: io::Read
-{	pub fn new(reader: T) -> Self
-	{	Self {reader}
-	}
-
-	pub fn unwrap(self) -> T
-	{	self.reader
-	}
-}
-
-impl<T> Iterator for ReadToIterator<T> where T: io::Read
-{	type Item = u8;
-
-	fn next(&mut self) -> Option<Self::Item>
-	{	let mut buffer = [0u8];
-		match self.reader.read(&mut buffer)
-		{	Ok(_) => Some(buffer[0]),
-			Err(_) => None,
-		}
-	}
-}
-
 pub struct Reader<T> where T: Iterator<Item=u8>
 {	iter: T,
 	lookahead: u8,
@@ -1362,7 +1295,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	/// // ...
 	/// source.take_last_error().unwrap();
 	/// ```
-	/// From file like this:
+	/// To read from file:
 	/// ```no_run
 	/// use std::fs::File;
 	/// use read_iter::ReadIter;
@@ -1399,7 +1332,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 
 	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
 	/// Use it when you read an object with [read_object()](struct.Reader.html#method.read_object) or [read_object_use_buffer()](struct.Reader.html#method.read_object_use_buffer).
-	/// It works like `read()`, but uses provided static string, that must be the name of the object property taht you are reading, in error message.
+	/// It works exactly like `read()`, but uses provided static string in error message. This string must be the name of the object property that you are reading.
 	pub fn read_prop<U>(&mut self, prop: &'static str) -> io::Result<U> where U: TryFromJson
 	{	self.path.push(PathItem::Prop(prop));
 		let result = self.read();
@@ -1409,7 +1342,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 
 	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
 	/// Use it when you read an array with [read_array()](struct.Reader.html#method.read_array).
-	/// It works like `read()`, but if error occures, the error message will contain index number in array.
+	/// It works exactly like `read()`, but if error occures, the error message will contain index number in array.
 	/// The index number is stored internally, and is incremented each time you call `read_index()` (`read_array()` resets it).
 	pub fn read_index<U>(&mut self) -> io::Result<U> where U: TryFromJson
 	{	if let Some(p) = self.path.last_mut()
@@ -2152,7 +2085,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
-	/// Reads a JSON string (numbers, booleans and null will be converted to string) to internal buffer, which is 128 bytes long.
+	/// Reads a JSON string (numbers, booleans and null will be converted to strings) to internal buffer, which is 128 bytes long.
 	/// And return a reference to the read bytes. Long strings will be truncated.
 	pub fn read_bytes(&mut self) -> io::Result<&[u8]>
 	{	match self.next_token()?
@@ -2186,22 +2119,20 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	}
 
 	/// This function allows us to exploit standard JSON containers to pass binary data (BLOBs, binary large objects, or `Vec<u8>`).
-	/// Does JSON standard strictly prohibit us to do so? Lets understand the principle behind this criminal operation.
 	///
-	/// Mr. JSON wants us to interchange only unicode strings. But he doesn't specify what unicode it must be: utf-8, utf-16, or other.
-	/// What is invalid utf-8 can be valid utf-16, and what is invalid utf-16 can be valid something else. Furthermore, passing invalid strings is normal, it happens every day.
-	/// The receiver of invalid string must reject it immediately, and not use it for his profit.
-	/// This library obeys to this requirement, and invalid utf-8 (only this encoding is supported) will fail conversion from `Vec<u8>` to `String`.
-	/// So reading an invalid utf-8 byte sequence to a `String` variable will really return error.
-	/// But `nop-json` library can optionally return you the `Vec<u8>` and tell you to convert it to `String` by yourself.
-	/// And you may decide not to do so, and get your hands on this useful byte sequence.
+	/// Accodring to JSON standard only valid unicode strings are valid JSON values. But the standard doesn't specify what kind of unicode it must be: utf-8, utf-16, or other.
+	/// What is invalid utf-8 can be valid utf-16, and what is invalid utf-16 can be valid something else. If we pack an invalid utf-8 sequence to a JSON container
+	/// and hand it to some other application, that application will encounter errors when it will try to convert it to a string, and it will say that the JSON
+	/// was invalid. But that application can not convert the bytes to string, and use the bytes themselves.
 	///
-	/// The trouble here is only with bytes in range `80 - FF`. Here is how we can encode our binary object:
-	/// 1) `00 - 1F` - we can encode with the `\u00xx` encoding - this is the only option.
-	/// 2) `20 - 7F` except `"` and `\` - we can leave intact - they are valid utf-8 JSON, or optionally we can encode them with `\u00xx`.
-	/// 3) `"` and `\` - escape with a slash.
-	/// 4) `80 - FF` - if we leave them as they are, this will make our string invalid utf-8 (but valid JSON container).
-	/// Ask yourself can you live with this. Another option could be to encode these characters with `\u00xx` sequences, but `\u0080` expands to 2-byte utf-8 character.
+	/// The wisdom is how to pack bytes that way. There's trouble here only with bytes in range `80 - FF`. Here is how we can encode our binary object:
+	///
+	///   - `00 - 1F` - we can encode with the `\u00xx` encoding - this is the only option.
+	///   - `20 - 7F` except `"` and `\` - we can leave intact - they are valid utf-8 JSON, or optionally we can encode them with `\u00xx`.
+	///   - `"` and `\` - escape with a slash.
+	///   - `80 - FF` - leave them as they are. They make our string invalid utf-8, but we cannot encode them with `\u00xx`. Because `\u0080` will expand to 2-byte utf-8 character on JSON-decoding.
+	///
+	/// Decoding example:
 	/// ```
 	/// use nop_json::Reader;
 	///
@@ -2209,6 +2140,23 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	///
 	/// let data = reader.read_blob().unwrap();
 	/// assert_eq!(data, b"\x80\x81");
+	/// ```
+	///
+	/// Encoding (and decoding back) example:
+	/// ```
+	/// use nop_json::{escape_bytes, Reader};
+	/// use std::io::Write;
+	///
+	/// let data = b"\x80\x81";
+	/// let mut json_container = Vec::with_capacity(100);
+	/// json_container.push(b'"');
+	/// json_container.write_all(escape_bytes(data).as_ref()).unwrap();
+	/// json_container.push(b'"');
+	/// assert_eq!(json_container, vec![b'"', b'\x80', b'\x81', b'"']);
+	///
+	/// let mut reader = Reader::new(json_container.iter().map(|i| *i));
+	/// let data_back = reader.read_blob().unwrap();
+	/// assert_eq!(data_back, data);
 	/// ```
 	pub fn read_blob(&mut self) -> io::Result<Vec<u8>>
 	{	match self.next_token()?
@@ -2226,7 +2174,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		}
 	}
 
-	/// Like [read_blob()](struct.Reader.html#method.read_blob), but pipes the data to the provided writer.
+	/// Like [read_blob()](struct.Reader.html#method.read_blob), but pipes data to the provided writer.
 	pub fn pipe_blob<U>(&mut self, writer: &mut U) -> io::Result<()> where U: io::Write
 	{	match self.next_token()?
 		{	Token::Null => Ok(()),
@@ -2274,12 +2222,12 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	}
 
 	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
-	/// This method reads a JSON object from the stream.
+	/// This method reads a JSON object from stream.
 	///
 	/// First it reads starting `{` char from the stream.
 	/// Then it reads a property name.
-	/// Then for each property name read, it calls given callback function, assuming that from this function you will read the property value, with [read_prop()](struct.Reader.html#method.read_prop).
-	/// Reading the value with [read()](struct.Reader.html#method.read) will also work (but in case of error, the error message will not contain path to the property where error occured).
+	/// Then for each property name read, it calls given callback function, assuming that from this function you will read the property value using [read_prop()](struct.Reader.html#method.read_prop).
+	/// Reading the value with [read()](struct.Reader.html#method.read) will also work, but in case of error, the error message will not contain path to the property where error occured.
 	///
 	/// Example:
 	/// ```
@@ -2370,13 +2318,13 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	}
 
 	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
-	/// This method reads a JSON object from the stream.
+	/// This method reads a JSON object from stream.
 	///
 	/// First it reads starting `{` char from the stream.
 	/// Then it reads a property name, and stores it in internal buffer. You can get it with [get_key()](struct.Reader.html#method.get_key).
 	/// The buffer is 128 bytes long, so if the property name is longer, it will be truncated. To avoid this limitation, use [read_object()](struct.Reader.html#method.read_object).
-	/// Then for each property name read, it calls given callback function, assuming that from this function you will read the property value, with [read_prop()](struct.Reader.html#method.read_prop).
-	/// Reading the value with [read()](struct.Reader.html#method.read) will also work (but in case of error, the error message will not contain path to the property where error occured).
+	/// Then for each property name read, it calls given callback function, assuming that from this function you will read the property value using [read_prop()](struct.Reader.html#method.read_prop).
+	/// Reading the value with [read()](struct.Reader.html#method.read) will also work, but in case of error, the error message will not contain path to the property where error occured.
 	///
 	/// Example:
 	/// ```
@@ -2472,7 +2420,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	}
 
 	/// This method is intended for use in cases when you want to implement [TryFromJson](trait.TryFromJson.html) manually.
-	/// This method reads a JSON array from the stream.
+	/// This method reads a JSON array from stream.
 	///
 	/// First it reads starting `[` char from the stream.
 	/// Then it calls given callback function as many times as needed to read each value till terminating `]`.

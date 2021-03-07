@@ -9,6 +9,19 @@ use std::sync::{RwLock, Mutex, Arc};
 use std::rc::Rc;
 
 
+/// Trait that can be automatically derived for structs and enums.
+///
+/// Example:
+///
+/// ```
+/// use nop_json::WriteToJson;
+///
+/// #[derive(WriteToJson)]
+/// struct Point {x: i32, y: i32}
+///
+/// let point = Point {x: 1, y: 2};
+/// point.write_to_json(&mut std::io::stdout()).unwrap();
+/// ```
 pub trait WriteToJson<W: io::Write>
 {	fn write_to_json(&self, out: &mut W) -> io::Result<()>;
 }

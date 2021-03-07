@@ -1,17 +1,14 @@
-#![feature(specialization)]
-
 //! This is full-featured modern JSON implementation according to ECMA-404 standard.
 //!
-//! This crate allows deserialization of JSON `Iterator<u8>` stream or `io::Read` into primitive types (`bool`, `i32`, etc.),
+//! This crate allows deserialization of JSON `Iterator<u8>` stream into primitive types (`bool`, `i32`, etc.),
 //! Strings and any other types that implement special trait called [TryFromJson](trait.TryFromJson.html), which can be implemented
 //! automatically through `#[derive(TryFromJson)]` for your structs and enums.
 //!
-//! And serialization back to JSON through [DebugToJson](trait.DebugToJson.html) trait, that acts like `Debug`, allowing to
-//! print your objects with `println!()` and such.
+//! And serialization back to JSON through [DebugToJson](trait.DebugToJson.html) trait, that acts like [Debug](https://doc.rust-lang.org/std/fmt/trait.Debug.html), allowing to
+//! print your objects with `println!()` and such. Or through [WriteToJson](trait.WriteToJson.html) trait that allows to write
+//! to a `io::Write` stream.
 //!
-//! It allows to read whitespece-separated JSON values from stream in sequence. It also allows to pipe blob strings to a writer.
-//!
-//! This implementation avoids unnecessary memory allocations and temporary object creations.
+//! This crate allows to read whitespece-separated JSON values from stream in sequence. It also allows to pipe blob strings to a writer.
 //!
 //! # Installation
 //!
@@ -19,12 +16,12 @@
 //!
 //! ```toml
 //! [dependencies]
-//! nop-json = "1.0"
+//! nop-json = "2.0"
 //! ```
 //!
 //! # Examples
 //!
-//! ## Creating the Reader object
+//! ## Creating Reader object
 //!
 //! First need to create a [Reader](struct.Reader.html) object giving it something that implements `Iterator<Item=u8>`.
 //! We can read from a string like this:
@@ -50,7 +47,7 @@
 //!
 //! ## Deserializing simple values
 //!
-//! To read JSON values from the input stream, call `reader.read()` method, and assign the result to a variable that implements `TryFromJson` trait.
+//! To read JSON values from an input stream, call `reader.read()` method, and assign the result to a variable that implements `TryFromJson`.
 //! This crate adds implementation of `TryFromJson` to many primitive types, `Vec`, `HashMap`, and more.
 //!
 //! ```
@@ -105,16 +102,16 @@
 //!
 //! ## Deserializing/serializing structs and enums
 //!
-//! To deserialize a struct or an enum, your struct needs to implement [TryFromJson](trait.TryFromJson.html) trait.
-//! To serialize - [DebugToJson](trait.DebugToJson.html).
+//! To deserialize a struct or an enum, your struct needs to implement [TryFromJson](trait.TryFromJson.html) and [ValidateJson](trait.ValidateJson.html) traits.
+//! To serialize - [DebugToJson](trait.DebugToJson.html) and/or [WriteToJson](trait.WriteToJson.html).
 //!
 //! ```
-//! use nop_json::{Reader, TryFromJson, DebugToJson};
+//! use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
 //!
-//! #[derive(TryFromJson, DebugToJson, PartialEq)]
+//! #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 //! struct Point {x: i32, y: i32}
 //!
-//! #[derive(TryFromJson, DebugToJson, PartialEq)]
+//! #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
 //! enum Geometry
 //! {	#[json(point)] Point(Point),
 //! 	#[json(cx, cy, r)] Circle(i32, i32, i32),
@@ -125,14 +122,14 @@
 //! let obj: Geometry = reader.read().unwrap();
 //! println!("Serialized back to JSON: {:?}", obj);
 //! ```
-//! See [TryFromJson](trait.TryFromJson.html), [DebugToJson](trait.DebugToJson.html).
+//! See [TryFromJson](trait.TryFromJson.html), [ValidateJson](trait.ValidateJson.html), [DebugToJson](trait.DebugToJson.html), [WriteToJson](trait.WriteToJson.html).
 //!
 //! ## Serializing scalar values
 //!
 //! You can println!() word "true" or "false" to serialize a boolean. Also numbers can be printed as println!() does by default.
 //! The format is JSON-compatible. To serialize a &str, you can use [escape](fn.escape.html) function.
 //!
-//! Alternatively you can create a [Value](enum.Value.html) object, and serialize it.
+//! Alternatively you can create a [Value](enum.Value.html) object, and serialize with it any scalar/nonscalar value.
 //! ```
 //! use std::convert::TryInto;
 //! use nop_json::Value;
@@ -167,7 +164,7 @@ mod value;
 mod debug_to_json;
 mod write_to_json;
 
-pub use crate::nop_json::{Reader, TryFromJson, OrDefault, OkFromJson, escape, escape_bytes, ReadToIterator};
+pub use crate::nop_json::{Reader, TryFromJson, ValidateJson, escape, escape_bytes};
 pub use crate::debug_to_json::DebugToJson;
 pub use crate::write_to_json::WriteToJson;
 pub use value::Value;

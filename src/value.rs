@@ -12,6 +12,31 @@ const FORMAT_NUM_WIDTH: usize = 10;
 const FORMAT_NUM_WIDTH_Z: [u8; FORMAT_NUM_WIDTH] = [b'0'; FORMAT_NUM_WIDTH];
 const FORMAT_NUM_WIDTH_0Z: &[u8] = b"0.0000000000";
 
+/// Type to store any JSON node.
+///
+/// Numbers are represented by 3 parts: mantissa, exponent, sign.
+///
+/// Many built-in types can be converted to `Value`.
+/// ```
+/// use nop_json::Value;
+/// use std::convert::TryInto;
+///
+/// let v0: Value = 3u32.try_into().unwrap();
+/// let v1: Value = vec![true, false, true].try_into().unwrap();
+/// assert_eq!(v0, Value::Number(3, 0, false));
+/// assert_eq!(v1, Value::Array(vec![Value::Bool(true), Value::Bool(false), Value::Bool(true)]));
+/// ```
+///
+/// And the `Value` can be converted to many types.
+/// ```
+/// use nop_json::Value;
+/// use std::convert::TryInto;
+///
+/// let v0: u32 = Value::Number(3, 0, false).try_into().unwrap();
+/// let v1: Vec<bool> = Value::Array(vec![Value::Bool(true), Value::Bool(false), Value::Bool(true)]).try_into().unwrap();
+/// assert_eq!(v0, 3u32);
+/// assert_eq!(v1, vec![true, false, true]);
+/// ```
 #[derive(Clone, PartialEq)]
 pub enum Value
 {	Null,
@@ -315,20 +340,26 @@ impl TryFrom<Value> for String
 	}
 }
 
-/*impl<T> TryFrom<Value> for Vec<T> where T: TryFrom<Value>
+impl<T> TryFrom<Value> for Vec<T> where T: TryFrom<Value>
 {	type Error = ();
 
 	fn try_from(value: Value) -> Result<Self, Self::Error>
 	{	match value
 		{	Value::Null => Ok(Vec::new()),
-			Value::Bool(v) => Err(()),
-			Value::Number(mantissa, _exponent, _is_negative) => Err(()),
+			Value::Bool(_v) => Err(()),
+			Value::Number(_mantissa, _exponent, _is_negative) => Err(()),
 			Value::String(_v) => Err(()),
-			Value::Array(v) => Ok(v),
+			Value::Array(v) =>
+			{	let mut arr = Vec::with_capacity(v.len());
+				for item in v
+				{	arr.push(item.try_into().map_err(|_| ())?)
+				}
+				Ok(arr)
+			}
 			Value::Object(_v) => Err(()),
 		}
 	}
-}*/
+}
 
 // 2. To value
 

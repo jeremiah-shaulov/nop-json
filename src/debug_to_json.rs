@@ -7,9 +7,67 @@ use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet, LinkedList, VecDequ
 use numtoa::NumToA;
 
 
+/// Trait that can be automatically derived for structs and enums. When it's derived, a [Debug](https://doc.rust-lang.org/std/fmt/trait.Debug.html) implementation is also added,
+/// so the object can be printed with `println!`.
+///
+/// Example:
+///
+/// ```
+/// use nop_json::DebugToJson;
+///
+/// #[derive(DebugToJson)]
+/// struct Point {x: i32, y: i32}
+///
+/// let point = Point {x: 1, y: 2};
+/// println!("{:?}", point);
+/// ```
+///
+/// Here is what automatic implementation expands to. If you write:
+///
+/// ```
+/// use nop_json::DebugToJson;
+///
+/// #[derive(DebugToJson)]
+/// struct Point {x: i32, y: i32}
+/// ```
+///
+/// The implementation will be:
+///
+/// ```
+/// use nop_json::DebugToJson;
+///
+/// struct Point {x: i32, y: i32}
+///
+/// impl DebugToJson for Point
+/// {	fn fmt(&self, out: &mut std::fmt::Formatter) -> std::fmt::Result
+/// 	{	write!(out, "{{\"x\":")?;
+/// 		DebugToJson::fmt(&self.x, out)?;
+/// 		write!(out, ",\"y\":")?;
+/// 		DebugToJson::fmt(&self.y, out)?;
+/// 		write!(out, "}}")
+/// 	}
+/// }
+/// impl std::fmt::Debug for Point
+/// {	fn fmt(&self, out: &mut std::fmt::Formatter) -> std::fmt::Result
+/// 	{	DebugToJson::fmt(self, out)
+/// 	}
+/// }
+/// ```
+///
+/// For more information, see [main page](index.html).
 pub trait DebugToJson
 {	fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result;
 
+	/// Any type that implements `DebugToJson` can be converted to JSON string.
+	/// ```
+	/// use nop_json::DebugToJson;
+	///
+	/// #[derive(DebugToJson)]
+	/// struct Something {value: i32}
+	///
+	/// let smth = Something {value: 123};
+	/// assert_eq!(smth.to_json_string(), "{\"value\":123}".to_string());
+	/// ```
 	fn to_json_string(&self) -> String where Self: std::marker::Sized
 	{	struct Wrapper<'a, T: DebugToJson>
 		{	value: &'a T
