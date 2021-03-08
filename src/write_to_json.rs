@@ -1,7 +1,7 @@
 pub use nop_json_derive::*;
 use crate::debug_to_json::DebugToJson;
 use crate::value::Value;
-use crate::nop_json::{escape};
+use crate::escape::escape;
 
 use std::{char, fmt, f32, f64, io};
 use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet, LinkedList, VecDeque};

@@ -155,6 +155,42 @@
 //!
 //! ## Reading binary data
 //! See [read_blob](struct.Reader.html#method.read_blob).
+//!
+//! ## Null, NaN, infinity and -0
+//!
+//! Reading to a variable of type `Option<T>` can read either `T` or `null`.
+//!
+//! ```
+//! use nop_json::Reader;
+//!
+//! let mut reader = Reader::new(r#" "non-null"  null "#.bytes());
+//!
+//! let str_or_null_1: Option<String> = reader.read().unwrap();
+//! let str_or_null_2: Option<String> = reader.read().unwrap();
+//!
+//! assert_eq!(str_or_null_1, Some("non-null".to_string()));
+//! assert_eq!(str_or_null_2, None);
+//! ```
+//!
+//! Reading junk to `f32` or `f64` type will read NaN. Reading string "Infinity", "-Infinity" and "-0" will read corresponding floating point numbers.
+//!
+//! ```
+//! use nop_json::Reader;
+//!
+//! let mut reader = Reader::new(r#" "Hello all!"  "Infinity"  "-Infinity"  "0"  "-0" "#.bytes());
+//!
+//! let nan: f32 = reader.read().unwrap();
+//! let inf: f32 = reader.read().unwrap();
+//! let minf: f32 = reader.read().unwrap();
+//! let zero: f32 = reader.read().unwrap();
+//! let mzero: f32 = reader.read().unwrap();
+//!
+//! assert!(nan.is_nan());
+//! assert_eq!(inf, f32::INFINITY);
+//! assert_eq!(minf, f32::NEG_INFINITY);
+//! assert!(zero==0.0 && !zero.is_sign_negative());
+//! assert!(mzero==0.0 && mzero.is_sign_negative());
+//! ```
 
 extern crate numtoa;
 extern crate nop_json_derive;
@@ -163,8 +199,12 @@ mod nop_json;
 mod value;
 mod debug_to_json;
 mod write_to_json;
+mod validate_json;
+mod escape;
 
-pub use crate::nop_json::{Reader, TryFromJson, ValidateJson, escape, escape_bytes};
+pub use crate::nop_json::{Reader, TryFromJson};
 pub use crate::debug_to_json::DebugToJson;
 pub use crate::write_to_json::WriteToJson;
+pub use crate::validate_json::ValidateJson;
+pub use crate::escape::{escape, escape_bytes};
 pub use value::Value;

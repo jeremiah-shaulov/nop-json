@@ -1,6 +1,7 @@
 pub use nop_json_derive::*;
+use crate::nop_json::{number_to_string, READER_BUFFER_SIZE};
 use crate::value::Value;
-use crate::nop_json::{number_to_string, escape, READER_BUFFER_SIZE};
+use crate::escape::escape;
 
 use std::{char, fmt, f32, f64};
 use std::collections::{HashMap, HashSet, BTreeMap, BTreeSet, LinkedList, VecDeque};
