@@ -636,6 +636,36 @@ macro_rules! read_float
 ///
 /// ```
 ///
+/// ## Ignoring fields
+///
+/// By default invalid object properties report error.
+/// ```
+/// use std::io;
+/// use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
+///
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
+/// struct Point {x: i32, y: i32}
+///
+/// let mut reader = Reader::new(r#" {"x": 0, "y": 1, "comments": "No comments"} "#.bytes());
+/// let obj_0: io::Result<Point> = reader.read();
+/// assert!(obj_0.is_err());
+/// ```
+///
+/// To ignore specific fields from JSON input, use `#[json_ignore(name_1, name_2)]` or `#[json_ignore("name_1", "name_2")]`.
+/// To ignore all unknown fields: `#[json_ignore]`.
+/// ```
+/// use std::io;
+/// use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
+///
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
+/// #[json_ignore]
+/// struct Point {x: i32, y: i32}
+///
+/// let mut reader = Reader::new(r#" {"x": 0, "y": 1, "comments": "No comments"} "#.bytes());
+/// let obj_0: Point = reader.read().unwrap();
+/// assert_eq!(obj_0, Point {x: 0, y: 1});
+/// ```
+///
 /// ## Implementing TryFromJson manually
 ///
 /// Automatic implementation through `#[derive(TryFromJson)]` has 1 limitation: object key string must be not longer

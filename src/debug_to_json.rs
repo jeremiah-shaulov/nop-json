@@ -59,7 +59,14 @@ use numtoa::NumToA;
 pub trait DebugToJson
 {	fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result;
 
-	/// Any type that implements `DebugToJson` can be converted to JSON string.
+	/// Any type that implements `DebugToJson` can be converted to JSON string. For example `DebugToJson` is implemented for primitive types:
+	/// ```
+	/// use nop_json::DebugToJson;
+	///
+	/// let smth = true;
+	/// assert_eq!(smth.to_json_string(), "true".to_string());
+	/// ```
+	/// For custom types:
 	/// ```
 	/// use nop_json::DebugToJson;
 	///

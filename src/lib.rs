@@ -192,9 +192,6 @@
 //! assert!(mzero==0.0 && mzero.is_sign_negative());
 //! ```
 
-extern crate numtoa;
-extern crate nop_json_derive;
-
 mod nop_json;
 mod value;
 mod debug_to_json;
