@@ -638,7 +638,7 @@ macro_rules! read_float
 ///
 /// ## Ignoring fields
 ///
-/// By default invalid object properties report error.
+/// By default invalid object properties report errors.
 /// ```
 /// use std::io;
 /// use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
@@ -664,6 +664,32 @@ macro_rules! read_float
 /// let mut reader = Reader::new(r#" {"x": 0, "y": 1, "comments": "No comments"} "#.bytes());
 /// let obj_0: Point = reader.read().unwrap();
 /// assert_eq!(obj_0, Point {x: 0, y: 1});
+/// ```
+/// In enums `#[json_ignore]` placed at enum level applies to all variants. Plus each variant can have it's own ignore list.
+/// ```
+/// use std::io;
+/// use nop_json::{Reader, TryFromJson, ValidateJson, DebugToJson};
+///
+/// #[derive(TryFromJson, ValidateJson, DebugToJson, PartialEq)]
+/// #[json(type)]
+/// #[json_ignore(comments)]
+/// enum Geometry
+/// {	#[json(point(x, y))]
+/// 	#[json_ignore(point_comments)]
+/// 	Point(i32, i32),
+///
+/// 	#[json(circle(cx, cy, r))]
+/// 	#[json_ignore(circle_comments)]
+/// 	Circle(i32, i32, i32),
+/// }
+///
+/// let mut reader = Reader::new(r#" {"type": "point", "x": 0, "y": 1, "comments": "No comments", "point_comments": "No comments"} "#.bytes());
+/// let obj_0: Geometry = reader.read().unwrap();
+/// assert_eq!(obj_0, Geometry::Point(0, 1));
+///
+/// let mut reader = Reader::new(r#" {"type": "point", "x": 0, "y": 1, "circle_comments": "No comments"} "#.bytes());
+/// let obj_0: io::Result<Geometry> = reader.read();
+/// assert!(obj_0.is_err());
 /// ```
 ///
 /// ## Implementing TryFromJson manually
