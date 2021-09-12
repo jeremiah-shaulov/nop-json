@@ -4,7 +4,7 @@ use std::f32;
 
 #[test]
 fn test_number()
-{	let mut reader = Reader::new(r#" 0 0.01 123 128 -128 -129 255 -1 -1e+2 1e2 123e-7 0.0123e-10 1e-1000000 1e10000000000 "Infinity" "-Infinity" "hello" true "#.bytes());
+{	let mut reader = Reader::new(r#" 0 0.01 123 128 -128 -129 255 -1 -1e+2 1e2 123e-7 0.0123e-10 3000.0 -3000.0 1e-1000000 1e10000000000 "Infinity" "-Infinity" "hello" true null "#.bytes());
 	assert_eq!(reader.read::<i16>().unwrap(), 0); // 0
 	assert_eq!(reader.read::<u16>().unwrap(), 0); // 0.01
 	assert_eq!(reader.read::<i8>().unwrap(), 123); // 123
@@ -19,12 +19,15 @@ fn test_number()
 	assert!(n > 123e-7 - 0.1e-10 && n < 123e-7 + 0.1e-10);
 	let n: f64 = reader.read().unwrap(); // 0.0123e-10
 	assert!(n > 0.0123e-10 - 0.1e-16 && n < 0.0123e-10 + 0.1e-16);
+	assert_eq!(reader.read::<f64>().unwrap(), 3000.0); // 3000.0
+	assert_eq!(reader.read::<f64>().unwrap(), -3000.0); // -3000.0
 	assert_eq!(reader.read::<f32>().unwrap(), 0.0); // 1e-1000000
 	assert!(reader.read::<f64>().unwrap().is_nan()); // 1e10000000000
 	assert!(reader.read::<f64>().unwrap().is_infinite()); // "Infinity"
 	assert!(reader.read::<f64>().unwrap().is_infinite()); // "-Infinity"
 	assert!(reader.read::<f64>().unwrap().is_nan()); // "hello"
 	assert_eq!(reader.read::<i16>().unwrap(), 1); // true
+	assert_eq!(reader.read::<f32>().unwrap(), 0.0); // null
 }
 
 #[test]
@@ -252,6 +255,14 @@ fn test_value()
 	let v: Value = reader.read().unwrap();
 	let v: i32 = v.try_into().unwrap();
 	assert_eq!(v, 123);
+
+	assert_eq!(Reader::new(r#" [null] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Null]));
+	assert_eq!(Reader::new(r#" [false] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Bool(false)]));
+	assert_eq!(Reader::new(r#" [true] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Bool(true)]));
+	assert_eq!(Reader::new(r#" [-3000] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Number(3, 3, true)]));
+	assert_eq!(Reader::new(r#" [-3000.0] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Number(3, 3, true)]));
+	assert_eq!(Reader::new(r#" [-3000.00e1] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Number(3, 4, true)]));
+	assert_eq!(Reader::new(r#" [-3000.00e-1] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Number(3, 2, true)]));
 }
 
 #[test]
@@ -359,4 +370,56 @@ fn test_write()
 	assert_eq!(&to_json(" Hello ".to_string()), "\" Hello \"");
 	assert_eq!(&to_json(Person {first_name: "John".to_string(), last_name: "Doe".to_string()}), "{\"first_name\":\"John\",\"last_name\":\"Doe\"}");
 	assert_eq!(&to_json(Person2 {first_name: "John".to_string(), last_name: "Doe".to_string()}), "{\"first_name\":\"John\",\"last_name\":\"Doe\"}");
+}
+
+#[test]
+fn test_value_is()
+{	let v: Value = Reader::new(r#" [null, false, 12.3, "12.3", [], {}] "#.bytes()).read().unwrap();
+	assert_eq!(v.is_array(), true);
+	match v
+	{	Value::Array(v) =>
+		{	assert_eq!(v[0].is_null(), true);
+			assert_eq!(v[0].is_bool(), false);
+			assert_eq!(v[0].is_number(), false);
+			assert_eq!(v[0].is_string(), false);
+			assert_eq!(v[0].is_array(), false);
+			assert_eq!(v[0].is_object(), false);
+
+			assert_eq!(v[1].is_null(), false);
+			assert_eq!(v[1].is_bool(), true);
+			assert_eq!(v[1].is_number(), false);
+			assert_eq!(v[1].is_string(), false);
+			assert_eq!(v[1].is_array(), false);
+			assert_eq!(v[1].is_object(), false);
+
+			assert_eq!(v[2].is_null(), false);
+			assert_eq!(v[2].is_bool(), false);
+			assert_eq!(v[2].is_number(), true);
+			assert_eq!(v[2].is_string(), false);
+			assert_eq!(v[2].is_array(), false);
+			assert_eq!(v[2].is_object(), false);
+
+			assert_eq!(v[3].is_null(), false);
+			assert_eq!(v[3].is_bool(), false);
+			assert_eq!(v[3].is_number(), false);
+			assert_eq!(v[3].is_string(), true);
+			assert_eq!(v[3].is_array(), false);
+			assert_eq!(v[3].is_object(), false);
+
+			assert_eq!(v[4].is_null(), false);
+			assert_eq!(v[4].is_bool(), false);
+			assert_eq!(v[4].is_number(), false);
+			assert_eq!(v[4].is_string(), false);
+			assert_eq!(v[4].is_array(), true);
+			assert_eq!(v[4].is_object(), false);
+
+			assert_eq!(v[5].is_null(), false);
+			assert_eq!(v[5].is_bool(), false);
+			assert_eq!(v[5].is_number(), false);
+			assert_eq!(v[5].is_string(), false);
+			assert_eq!(v[5].is_array(), false);
+			assert_eq!(v[5].is_object(), true);
+		}
+		_ => unreachable!()
+	}
 }

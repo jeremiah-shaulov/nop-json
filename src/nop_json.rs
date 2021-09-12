@@ -342,7 +342,7 @@ macro_rules! read_float
 						let mut exponent = 0i32;
 						let mut is_after_dot = 0;
 						let mut result = 0 as $T;
-						let mut ten = 10 as $T;
+						let mut ten = 1;
 						let mut is_error = false;
 						if c == b'-'
 						{	is_negative = true;
@@ -361,13 +361,24 @@ macro_rules! read_float
 						{	match c
 							{	b'0' =>
 								{	exponent += is_after_dot;
-									ten *= 10 as $T;
+									ten += 1;
 								}
 								b'1'..= b'9' =>
 								{	exponent += is_after_dot;
-									result *= ten;
+									result *= match ten
+									{	1 => 10.0,
+										2 => 100.0,
+										3 => 1000.0,
+										4 => 10000.0,
+										5 => 100000.0,
+										6 => 1000000.0,
+										7 => 10000000.0,
+										8 => 100000000.0,
+										9 => 1000000000.0,
+										_ => (10 as $T).powi(ten)
+									};
 									result += (c - b'0') as $T;
-									ten = 10 as $T;
+									ten = 1;
 								}
 								b'.' => {is_after_dot = -1}
 								b'e' | b'E' =>
@@ -439,12 +450,20 @@ macro_rules! read_float
 							}
 							return Ok($nan);
 						}
-						if is_after_dot==0 && ten>10.0
-						{	result *= ten / 10.0;
-						}
-						if exponent != 0
-						{	result *= (10 as $T).powi(exponent);
-						}
+						exponent += ten - 1;
+						match exponent
+						{	0 => {},
+							1 => result *= 10.0,
+							2 => result *= 100.0,
+							3 => result *= 1000.0,
+							4 => result *= 10000.0,
+							5 => result *= 100000.0,
+							6 => result *= 1000000.0,
+							7 => result *= 10000000.0,
+							8 => result *= 100000000.0,
+							9 => result *= 1000000000.0,
+							_ => result *= (10 as $T).powi(exponent)
+						};
 						if is_negative
 						{	result = -result;
 						}
@@ -1472,9 +1491,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 									{	self.lookahead = b' ';
 										return Err(self.number_error());
 									}
-									if is_after_dot == 0
-									{	exponent += n_trailing_zeroes;
-									}
+									exponent += n_trailing_zeroes;
 									pos -= n_trailing_zeroes as usize;
 								}
 								match exponent.checked_add(if n_is_negative {-n} else {n})
@@ -1488,12 +1505,8 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 							}
 							_ =>
 							{	self.lookahead = c;
-								if n_trailing_zeroes > 0
-								{	if is_after_dot == 0
-									{	exponent += n_trailing_zeroes;
-									}
-									pos -= n_trailing_zeroes as usize;
-								}
+								exponent += n_trailing_zeroes;
+								pos -= n_trailing_zeroes as usize;
 								break;
 							}
 						}
@@ -2460,47 +2473,52 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 			Token::ArrayEnd => Err(self.format_error("Invalid JSON input: unexpected ']'")),
 			Token::ObjectBegin =>
 			{	let mut obj = HashMap::new();
-				loop
-				{	match self.next_token()?
-					{	Token::Null => return Err(self.format_error("Invalid JSON input: expected key, got null")),
-						Token::False => return Err(self.format_error("Invalid JSON input: expected key, got false")),
-						Token::True => return Err(self.format_error("Invalid JSON input: expected key, got true")),
-						Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected key, got number")),
-						Token::Quote => {},
-						Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected key, got '['")),
-						Token::ArrayEnd => return Err(self.format_error("Invalid JSON input: expected key, got ']'")),
-						Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected key, got '{'")),
-						Token::ObjectEnd => return Err(self.format_error("Invalid JSON input: expected key, got '}'")),
-						Token::Comma => return Err(self.format_error("Invalid JSON input: expected key, got ','")),
-						Token::Colon => return Err(self.format_error("Invalid JSON input: expected key, got ':'")),
-					}
-					let key = self.read_string_contents()?;
-					match self.next_token()?
-					{	Token::Null => return Err(self.format_error("Invalid JSON input: expected ':', got null")),
-						Token::False => return Err(self.format_error("Invalid JSON input: expected ':', got false")),
-						Token::True => return Err(self.format_error("Invalid JSON input: expected ':', got true")),
-						Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected ':', got number")),
-						Token::Quote => return Err(self.format_error("Invalid JSON input: expected ':', got string")),
-						Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected ':', got '['")),
-						Token::ArrayEnd => return Err(self.format_error("Invalid JSON input: expected ':', got ']'")),
-						Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected ':', got '{'")),
-						Token::ObjectEnd => return Err(self.format_error("Invalid JSON input: expected ':', got '}'")),
-						Token::Comma => return Err(self.format_error("Invalid JSON input: expected ':', got ','")),
-						Token::Colon => {},
-					}
-					obj.insert(key, self.read_value()?);
-					match self.next_token()?
-					{	Token::Null => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got null")),
-						Token::False => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got false")),
-						Token::True => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got true")),
-						Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got number")),
-						Token::Quote => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got string")),
-						Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got '['")),
-						Token::ArrayEnd => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got ']'")),
-						Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got '{'")),
-						Token::ObjectEnd => break,
-						Token::Comma => {},
-						Token::Colon => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got ':'")),
+				if self.get_next_char() == b'}'
+				{	self.lookahead = b' ';
+				}
+				else
+				{	loop
+					{	match self.next_token()?
+						{	Token::Null => return Err(self.format_error("Invalid JSON input: expected key, got null")),
+							Token::False => return Err(self.format_error("Invalid JSON input: expected key, got false")),
+							Token::True => return Err(self.format_error("Invalid JSON input: expected key, got true")),
+							Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected key, got number")),
+							Token::Quote => {},
+							Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected key, got '['")),
+							Token::ArrayEnd => return Err(self.format_error("Invalid JSON input: expected key, got ']'")),
+							Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected key, got '{'")),
+							Token::ObjectEnd => return Err(self.format_error("Invalid JSON input: expected key, got '}'")),
+							Token::Comma => return Err(self.format_error("Invalid JSON input: expected key, got ','")),
+							Token::Colon => return Err(self.format_error("Invalid JSON input: expected key, got ':'")),
+						}
+						let key = self.read_string_contents()?;
+						match self.next_token()?
+						{	Token::Null => return Err(self.format_error("Invalid JSON input: expected ':', got null")),
+							Token::False => return Err(self.format_error("Invalid JSON input: expected ':', got false")),
+							Token::True => return Err(self.format_error("Invalid JSON input: expected ':', got true")),
+							Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected ':', got number")),
+							Token::Quote => return Err(self.format_error("Invalid JSON input: expected ':', got string")),
+							Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected ':', got '['")),
+							Token::ArrayEnd => return Err(self.format_error("Invalid JSON input: expected ':', got ']'")),
+							Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected ':', got '{'")),
+							Token::ObjectEnd => return Err(self.format_error("Invalid JSON input: expected ':', got '}'")),
+							Token::Comma => return Err(self.format_error("Invalid JSON input: expected ':', got ','")),
+							Token::Colon => {},
+						}
+						obj.insert(key, self.read_value()?);
+						match self.next_token()?
+						{	Token::Null => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got null")),
+							Token::False => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got false")),
+							Token::True => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got true")),
+							Token::Number(_e, _n) => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got number")),
+							Token::Quote => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got string")),
+							Token::ArrayBegin => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got '['")),
+							Token::ArrayEnd => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got ']'")),
+							Token::ObjectBegin => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got '{'")),
+							Token::ObjectEnd => break,
+							Token::Comma => {},
+							Token::Colon => return Err(self.format_error("Invalid JSON input: expected ',' or '}', got ':'")),
+						}
 					}
 				}
 				Ok(Value::Object(obj))
