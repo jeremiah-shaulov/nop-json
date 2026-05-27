@@ -99,7 +99,6 @@ macro_rules! read_int
 						let mut exponent = 0i32;
 						let mut is_after_dot = false;
 						let mut result = 0 as $T;
-						let mut ten = 10 as $T;
 						let mut is_error = false;
 						if c == b'-'
 						{	is_negative = true;
@@ -107,14 +106,11 @@ macro_rules! read_int
 						}
 						loop
 						{	match c
-							{	b'0' =>
-								{	ten = ten.checked_mul(10).unwrap_or_else(|| {if !is_after_dot {is_error = true}; 0});
-								}
-								b'1'..= b'9' =>
+							{	b'0' ..= b'9' =>
 								{	if !is_after_dot
-									{	result = result.checked_mul(ten).unwrap_or_else(|| {is_error = true; 0});
+									{	// accumulate each digit eagerly with checked ops, so a representable value never trips an intermediate-overflow false positive
+										result = result.checked_mul(10 as $T).unwrap_or_else(|| {is_error = true; 0});
 										result = result.checked_add(if $is_unsigned {(c - b'0') as $T} else {(b'0' as i8 - c as i8) as $T}).unwrap_or_else(|| {is_error = true; 0}); // if signed, make negative number (because wider range), and then negate (if not is_negative)
-										ten = 10 as $T;
 									}
 								}
 								b'.' => {is_after_dot = true}
@@ -177,9 +173,6 @@ macro_rules! read_int
 								}
 								break;
 							}
-						}
-						if !is_after_dot && ten>(10 as $T)
-						{	result = result.checked_mul(ten / (10 as $T)).unwrap_or_else(|| {is_error = true; 0});
 						}
 						if exponent != 0
 						{	result = result.checked_mul((10 as $T).checked_pow(exponent as u32).unwrap_or_else(|| {is_error = true; 0})).unwrap_or_else(|| {is_error = true; 0});
@@ -1515,6 +1508,9 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 						}
 						else
 						{	self.lookahead = b' ';
+							// number terminated by end of input: normalize trailing zeroes just like the delimiter case above
+							exponent += n_trailing_zeroes;
+							pos -= n_trailing_zeroes as usize;
 							break;
 						}
 					}
@@ -1610,11 +1606,16 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 			{	self.buffer[buf_pos] = (0xE0 | (c >> 12)) as u8;
 				self.buffer[buf_pos+1] = (0x80 | ((c >> 6) & 0x3F)) as u8;
 				self.buffer[buf_pos+2] = (0x80 | (c & 0x3F)) as u8;
-				Ok(2)
+				Ok(3)
 			}
 		}
 		else if c <= 0xDBFF
-		{	// UTF-16 surrogate pairs
+		{	// UTF-16 surrogate pairs: the high surrogate must be followed by a `\u` low surrogate
+			let bs = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+			let u = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+			if bs != b'\\' || u != b'u'
+			{	return Err(self.format_error("Invalid UTF-16 surrogate pair"));
+			}
 			let c0 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 			let c1 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 			let c2 = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
@@ -1622,7 +1623,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 			let cc = (self.hex_to_u32(c0)? << 12) | (self.hex_to_u32(c1)? << 8) | (self.hex_to_u32(c2)? << 4) | self.hex_to_u32(c3)?;
 			if cc >= 0xDC00 && cc <= 0xDFFF
 			{	let c = 0x10000 + (((c-0xD800) << 10) | (cc-0xDC00));
-				Ok((&mut self.buffer[buf_pos ..]).write(&[0xFFu8, (c >> 18) as u8, (0x80 | ((c >> 12) & 0x3F)) as u8, (0x80 | ((c >> 6) & 0x3F)) as u8, (0x80 | (c & 0x3F)) as u8]).unwrap())
+				Ok((&mut self.buffer[buf_pos ..]).write(&[(0xF0 | (c >> 18)) as u8, (0x80 | ((c >> 12) & 0x3F)) as u8, (0x80 | ((c >> 6) & 0x3F)) as u8, (0x80 | (c & 0x3F)) as u8]).unwrap())
 			}
 			else
 			{	Err(self.format_error("Invalid UTF-16 surrogate pair"))

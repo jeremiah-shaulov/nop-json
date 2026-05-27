@@ -112,12 +112,12 @@ impl DebugToJson for u8    {fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Resu
 impl DebugToJson for f64
 {	fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result
 	{	if *self == f64::INFINITY
-		{	write!(out, "Infinity")
+		{	write!(out, "\"Infinity\"")
 		}
 		else if *self == f64::NEG_INFINITY
-		{	write!(out, "-Infinity")
+		{	write!(out, "\"-Infinity\"")
 		}
-		else if *self == f64::NAN
+		else if self.is_nan()
 		{	write!(out, "\"NaN\"")
 		}
 		else
@@ -133,7 +133,7 @@ impl DebugToJson for f32
 		else if *self == f32::NEG_INFINITY
 		{	write!(out, "\"-Infinity\"")
 		}
-		else if *self == f32::NAN
+		else if self.is_nan()
 		{	write!(out, "\"NaN\"")
 		}
 		else
@@ -150,11 +150,8 @@ impl DebugToJson for bool
 
 impl DebugToJson for char
 {	fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result
-	{	match *self
-		{	'"' => write!(out, stringify!("\"")),
-			'\\' => write!(out, stringify!("\\")),
-			_ => write!(out, "\"{}\"", self),
-		}
+	{	let mut buffer = [0u8; 4];
+		write!(out, "\"{}\"", escape(self.encode_utf8(&mut buffer)))
 	}
 }
 
