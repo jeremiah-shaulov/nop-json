@@ -1,6 +1,6 @@
 [package]
 name = "nop-json"
-version = "2.0.5"
+version = "2.1.0"
 authors = ["Jeremiah Shaulov <jeremiah.shaulov@gmail.com>"]
 edition = "2024"
 license = "MIT"
@@ -11,7 +11,10 @@ keywords = ["json"]
 
 [dependencies]
 numtoa = "1.0"
-nop-json-derive = "2.0"
+nop-json-derive = "2.1"
 
 [dev-dependencies]
 read_iter = "0.1"
+
+[patch.crates-io]
+nop-json-derive = { path = "../nop-json-derive" }

@@ -27,7 +27,7 @@ you ask for one.
 
 ```toml
 [dependencies]
-nop-json = "2.0"
+nop-json = "2.1"
 ```
 
 ## Quick start
