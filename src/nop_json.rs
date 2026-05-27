@@ -7,6 +7,8 @@ use std::convert::TryInto;
 use numtoa::NumToA;
 
 pub const READER_BUFFER_SIZE: usize = 128;
+const DEFAULT_DEPTH_LIMIT: usize = 256; // kept well within a 2 MiB thread stack; override via ReaderBuilder::depth_limit
+const MAX_VALUE_SIZE_LIMIT: usize = 1024 * 1024 * 1024; // 1 GiB, can be overridden by user
 const FORMAT_NUM_WIDTH: usize = 10;
 const FORMAT_NUM_WIDTH_Z: [u8; FORMAT_NUM_WIDTH] = [b'0'; FORMAT_NUM_WIDTH];
 const FORMAT_NUM_WIDTH_0Z: &[u8] = b"0.0000000000";
@@ -1197,6 +1199,67 @@ pub fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, m
 	}
 }
 
+#[derive(Clone, Copy)]
+struct Options
+{	depth_limit: usize,
+	value_size_limit: usize,
+}
+
+impl Default for Options
+{	fn default() -> Self
+	{	Options {depth_limit: DEFAULT_DEPTH_LIMIT, value_size_limit: MAX_VALUE_SIZE_LIMIT}
+	}
+}
+
+/// Builder for [Reader](struct.Reader.html). Lets you override parsing limits before attaching the input stream.
+///
+/// ```
+/// use nop_json::ReaderBuilder;
+///
+/// let mut reader = ReaderBuilder::new().depth_limit(32).build(" [1, 2, 3] ".bytes());
+/// let arr: Vec<i32> = reader.read().unwrap();
+/// assert_eq!(arr, vec![1, 2, 3]);
+/// ```
+#[derive(Clone, Copy, Default)]
+pub struct ReaderBuilder
+{	options: Options,
+}
+
+impl ReaderBuilder
+{	/// New builder with default limits (see [depth_limit](#method.depth_limit) and [value_size_limit](#method.value_size_limit)).
+	pub fn new() -> Self
+	{	ReaderBuilder::default()
+	}
+
+	/// Maximum nesting depth of arrays and objects. Input nested deeper than this is rejected with an error,
+	/// instead of risking a stack overflow while parsing untrusted data. Default: 256.
+	pub fn depth_limit(mut self, depth_limit: usize) -> Self
+	{	self.options.depth_limit = depth_limit;
+		self
+	}
+
+	/// Maximum length, in bytes, of a single string or binary blob value that is read into memory.
+	/// Longer values are rejected with an error. Default: 1 GiB.
+	pub fn value_size_limit(mut self, value_size_limit: usize) -> Self
+	{	self.options.value_size_limit = value_size_limit;
+		self
+	}
+
+	/// Create a [Reader](struct.Reader.html) that reads from `iter` using the configured limits.
+	pub fn build<T>(self, iter: T) -> Reader<T> where T: Iterator<Item=u8>
+	{	Reader
+		{	iter,
+			lookahead: b' ',
+			path: Vec::new(),
+			last_index: 0,
+			buffer_len: 0,
+			buffer: [0u8; READER_BUFFER_SIZE],
+			depth: 0,
+			options: self.options,
+		}
+	}
+}
+
 pub struct Reader<T> where T: Iterator<Item=u8>
 {	iter: T,
 	lookahead: u8,
@@ -1204,6 +1267,8 @@ pub struct Reader<T> where T: Iterator<Item=u8>
 	last_index: usize,
 	buffer_len: usize,
 	buffer: [u8; READER_BUFFER_SIZE], // must be at least 48 bytes for correct number reading
+	depth: usize,
+	options: Options,
 }
 impl<T> Reader<T> where T: Iterator<Item=u8>
 {	/// Construct new reader object, that can read values from a JSON stream, passing an object that implements `Iterator<Item=u8>`.
@@ -1247,14 +1312,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	/// source.take_last_error().unwrap();
 	/// ```
 	pub fn new(iter: T) -> Reader<T>
-	{	Reader
-		{	iter,
-			lookahead: b' ',
-			path: Vec::new(),
-			last_index: 0,
-			buffer_len: 0,
-			buffer: [0u8; READER_BUFFER_SIZE],
-		}
+	{	ReaderBuilder::new().build(iter)
 	}
 
 	/// Destroy this reader, unwrapping the underlying iterator that was passed to constructor when this object created.
@@ -1326,6 +1384,23 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 
 	fn number_error(&self) -> io::Error
 	{	self.format_error("Invalid JSON input: Number is too big")
+	}
+
+	/// Enter one level of array/object nesting, failing if it would exceed the configured depth limit.
+	/// Called from `next_token` whenever a `[` or `{` is produced, which bounds the recursion depth of
+	/// every parser (read_value, read_array/object, skip_array/object, tuples, derived types) and so
+	/// guards against stack overflow on deeply nested untrusted input.
+	fn enter(&mut self) -> io::Result<()>
+	{	self.depth += 1;
+		if self.depth > self.options.depth_limit
+		{	return Err(self.format_error("Invalid JSON input: nesting is too deep"));
+		}
+		Ok(())
+	}
+
+	/// Leave one level of nesting. Saturating, so a stray `]`/`}` can't underflow the counter.
+	fn leave(&mut self)
+	{	self.depth = self.depth.saturating_sub(1);
 	}
 
 	fn get_next_char(&mut self) -> u8
@@ -1526,18 +1601,22 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 				}
 				b'[' =>
 				{	self.lookahead = b' ';
+					self.enter()?;
 					return Ok(Token::ArrayBegin);
 				}
 				b']' =>
 				{	self.lookahead = b' ';
+					self.leave();
 					return Ok(Token::ArrayEnd);
 				}
 				b'{' =>
 				{	self.lookahead = b' ';
+					self.enter()?;
 					return Ok(Token::ObjectBegin);
 				}
 				b'}' =>
 				{	self.lookahead = b' ';
+					self.leave();
 					return Ok(Token::ObjectEnd);
 				}
 				b',' =>
@@ -1651,7 +1730,10 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	fn read_blob_contents(&mut self) -> io::Result<Vec<u8>>
 	{	let mut bytes = Vec::new();
 		loop
-		{	let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
+		{	if bytes.len() > self.options.value_size_limit
+			{	return Err(self.format_error("Invalid JSON input: string or blob value is too large"));
+			}
+			let c = self.iter.next().ok_or_else(|| self.format_error("Invalid JSON: unexpected end of input"))?;
 			match c
 			{	b'"' => break,
 				b'\\' =>
@@ -2400,6 +2482,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 			Token::ArrayBegin =>
 			{	if self.get_next_char() == b']'
 				{	self.lookahead = b' ';
+					self.leave(); // empty array: the ']' is consumed here, not via next_token
 				}
 				else
 				{	self.path.push(PathItem::Index(0));
@@ -2450,6 +2533,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 			{	let mut vec = Vec::new();
 				if self.get_next_char() == b']'
 				{	self.lookahead = b' ';
+					self.leave(); // empty array: the ']' is consumed here, not via next_token
 				}
 				else
 				{	loop
@@ -2476,6 +2560,7 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 			{	let mut obj = HashMap::new();
 				if self.get_next_char() == b'}'
 				{	self.lookahead = b' ';
+					self.leave(); // empty object: the '}' is consumed here, not via next_token
 				}
 				else
 				{	loop

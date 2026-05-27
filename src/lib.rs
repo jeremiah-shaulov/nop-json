@@ -199,7 +199,7 @@ mod write_to_json;
 mod validate_json;
 mod escape;
 
-pub use crate::nop_json::{Reader, TryFromJson};
+pub use crate::nop_json::{Reader, ReaderBuilder, TryFromJson};
 pub use crate::debug_to_json::DebugToJson;
 pub use crate::write_to_json::WriteToJson;
 pub use crate::validate_json::ValidateJson;
