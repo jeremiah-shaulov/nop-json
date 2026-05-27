@@ -1,14 +1,22 @@
-//! This is full-featured modern JSON implementation according to ECMA-404 standard.
+//! `nop-json` is a streaming JSON reader and writer. It deserializes a byte stream directly into your
+//! Rust types and serializes them back, without building an intermediate document — unless you ask for
+//! one with [Value](enum.Value.html).
 //!
-//! This crate allows deserialization of JSON `Iterator<u8>` stream into primitive types (`bool`, `i32`, etc.),
-//! Strings and any other types that implement special trait called [TryFromJson](trait.TryFromJson.html), which can be implemented
-//! automatically through `#[derive(TryFromJson)]` for your structs and enums.
+//! Deserialization reads from any `Iterator<Item=u8>` into any type that implements
+//! [TryFromJson](trait.TryFromJson.html): primitive types (`bool`, `i32`, ...), `String`, `char`,
+//! containers like `Vec` and `HashMap`, and your own structs and enums via `#[derive(TryFromJson)]`.
 //!
-//! And serialization back to JSON through [DebugToJson](trait.DebugToJson.html) trait, that acts like [Debug](https://doc.rust-lang.org/std/fmt/trait.Debug.html), allowing to
-//! print your objects with `println!()` and such. Or through [WriteToJson](trait.WriteToJson.html) trait that allows to write
-//! to a `io::Write` stream.
+//! Serialization goes back to JSON through [DebugToJson](trait.DebugToJson.html), which doubles as a
+//! [Debug](https://doc.rust-lang.org/std/fmt/trait.Debug.html) implementation (so `println!("{:?}", x)`
+//! and `x.to_json_string()` produce JSON), or through [WriteToJson](trait.WriteToJson.html), which
+//! writes to any `io::Write`.
 //!
-//! This crate allows to read whitespece-separated JSON values from stream in sequence. It also allows to pipe blob strings to a writer.
+//! A single [Reader](struct.Reader.html) reads a sequence of whitespace-separated values from one
+//! stream, and can pipe binary blobs straight to a writer.
+//!
+//! The accepted grammar is that of JSON (ECMA-404), with a few JavaScript-inspired conveniences
+//! described under [The JSON dialect](#the-json-dialect). When parsing untrusted input, see
+//! [Reading untrusted input](#reading-untrusted-input).
 //!
 //! # Installation
 //!
@@ -74,7 +82,6 @@
 //!
 //! ```
 //! use nop_json::{Reader, Value};
-//! use std::convert::TryInto;
 //!
 //! let mut reader = Reader::new(r#" true  100.5  "Hello"  [true, false] "#.bytes());
 //!
@@ -126,12 +133,12 @@
 //!
 //! ## Serializing scalar values
 //!
-//! You can println!() word "true" or "false" to serialize a boolean. Also numbers can be printed as println!() does by default.
-//! The format is JSON-compatible. To serialize a &str, you can use [escape](fn.escape.html) function.
+//! Booleans and numbers already format to valid JSON with their normal `Display` (`format!("{}", true)`
+//! is `"true"`). To serialize a `&str` as a JSON string, wrap it with the [escape](fn.escape.html)
+//! function. Alternatively, build a [Value](enum.Value.html) and serialize that.
 //!
 //! Alternatively you can create a [Value](enum.Value.html) object, and serialize with it any scalar/nonscalar value.
 //! ```
-//! use std::convert::TryInto;
 //! use nop_json::Value;
 //!
 //! let the_true: Value = true.try_into().unwrap();
@@ -191,6 +198,40 @@
 //! assert!(zero==0.0 && !zero.is_sign_negative());
 //! assert!(mzero==0.0 && mzero.is_sign_negative());
 //! ```
+//!
+//! # The JSON dialect
+//!
+//! `nop-json` reads and writes the JSON grammar of ECMA-404, with a few JavaScript-inspired
+//! conveniences:
+//!
+//! - On read, values are **coerced** toward the requested type: a quoted number (`"123"`) can be read
+//!   into a numeric type, a number can be read into a `String`, and reading `true`/`false`/`null` into
+//!   a number gives `1`/`0`/`0`.
+//! - Non-finite floats travel as JSON **strings**: `f32`/`f64` infinities and NaN serialize as
+//!   `"Infinity"`, `"-Infinity"` and `"NaN"`, and reading those strings (or `"-0"`) yields the matching
+//!   value, as shown in the section above.
+//! - This is **not** JSON5 — comments, single-quoted strings, unquoted keys, hexadecimal numbers and
+//!   bare `Infinity`/`NaN` are not accepted.
+//!
+//! # Reading untrusted input
+//!
+//! A [Reader](struct.Reader.html) enforces two limits so that hostile input cannot exhaust the stack
+//! or memory. To use non-default limits, build the reader with [ReaderBuilder](struct.ReaderBuilder.html):
+//!
+//! ```
+//! use nop_json::ReaderBuilder;
+//!
+//! let mut reader = ReaderBuilder::new()
+//!     .depth_limit(64)            // max array/object nesting; default 256
+//!     .value_size_limit(1 << 20)  // max bytes of one string or blob; default 1 GiB
+//!     .build(r#" [1, 2, 3] "#.bytes());
+//! let arr: Vec<i32> = reader.read().unwrap();
+//! assert_eq!(arr, vec![1, 2, 3]);
+//! ```
+//!
+//! `depth_limit` bounds parser recursion, so input nested deeper than the limit returns an error
+//! instead of overflowing the stack. `value_size_limit` caps the size of a single in-memory string or
+//! blob (it does not limit [pipe_blob](struct.Reader.html#method.pipe_blob), which streams).
 
 mod nop_json;
 mod value;

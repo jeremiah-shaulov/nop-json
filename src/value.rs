@@ -12,14 +12,17 @@ const FORMAT_NUM_WIDTH: usize = 10;
 const FORMAT_NUM_WIDTH_Z: [u8; FORMAT_NUM_WIDTH] = [b'0'; FORMAT_NUM_WIDTH];
 const FORMAT_NUM_WIDTH_0Z: &[u8] = b"0.0000000000";
 
-/// Type to store any JSON node.
+/// Holds any JSON node: null, boolean, number, string, array or object.
 ///
-/// Numbers are represented by 3 parts: mantissa, exponent, sign.
+/// A number is stored as three parts — `Value::Number(mantissa, exponent, is_negative)` — and equals
+/// `(if is_negative {-1} else {1}) * mantissa * 10.pow(exponent)`. So `-12.5` is
+/// `Value::Number(125, -1, true)`. Note that this representation is not normalized, so two `Value`s
+/// that print the same may compare unequal (e.g. `Value::Number(10, 0, false)` vs
+/// `Value::Number(1, 1, false)`).
 ///
 /// Many built-in types can be converted to `Value`.
 /// ```
 /// use nop_json::Value;
-/// use std::convert::TryInto;
 ///
 /// let v0: Value = 3u32.try_into().unwrap();
 /// let v1: Value = vec![true, false, true].try_into().unwrap();
@@ -30,7 +33,6 @@ const FORMAT_NUM_WIDTH_0Z: &[u8] = b"0.0000000000";
 /// And the `Value` can be converted to many types.
 /// ```
 /// use nop_json::Value;
-/// use std::convert::TryInto;
 ///
 /// let v0: u32 = Value::Number(3, 0, false).try_into().unwrap();
 /// let v1: Vec<bool> = Value::Array(vec![Value::Bool(true), Value::Bool(false), Value::Bool(true)]).try_into().unwrap();

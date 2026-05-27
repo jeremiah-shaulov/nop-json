@@ -1260,6 +1260,20 @@ impl ReaderBuilder
 	}
 }
 
+/// Reads JSON values from a byte stream (any `Iterator<Item=u8>`).
+///
+/// Create one with [Reader::new](#method.new), or with [ReaderBuilder](struct.ReaderBuilder.html) to
+/// set non-default limits. Then call [read](#method.read) to deserialize one value at a time; a single
+/// reader can read a whole sequence of whitespace-separated values from the same stream.
+///
+/// ```
+/// use nop_json::Reader;
+///
+/// let mut reader = Reader::new(r#" 1  "two"  [3, 4] "#.bytes());
+/// assert_eq!(reader.read::<i32>().unwrap(), 1);
+/// assert_eq!(reader.read::<String>().unwrap(), "two");
+/// assert_eq!(reader.read::<Vec<i32>>().unwrap(), vec![3, 4]);
+/// ```
 pub struct Reader<T> where T: Iterator<Item=u8>
 {	iter: T,
 	lookahead: u8,
@@ -1311,6 +1325,8 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	/// // ...
 	/// source.take_last_error().unwrap();
 	/// ```
+	/// The reader is created with default limits (nesting depth 256, single string/blob up to 1 GiB).
+	/// To change them, use [ReaderBuilder](struct.ReaderBuilder.html) instead.
 	pub fn new(iter: T) -> Reader<T>
 	{	ReaderBuilder::new().build(iter)
 	}
