@@ -1,4 +1,4 @@
-pub use nop_json_derive::*;
+pub use nop_json_derive::WriteToJson;
 use crate::debug_to_json::DebugToJson;
 use crate::value::Value;
 use crate::escape::escape;

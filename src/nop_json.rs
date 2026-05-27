@@ -1166,7 +1166,7 @@ pub fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, m
 	{	let e = exponent as usize;
 		if len+e <= FORMAT_NUM_WIDTH
 		{	// append zeroes according to exponent
-			&mut buffer[pos+len .. pos+len+e].copy_from_slice(&FORMAT_NUM_WIDTH_Z[0 .. e]);
+			buffer[pos+len .. pos+len+e].copy_from_slice(&FORMAT_NUM_WIDTH_Z[0 .. e]);
 			return Ok(pos + len + e);
 		}
 	}
@@ -1181,7 +1181,7 @@ pub fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, m
 		if e <= FORMAT_NUM_WIDTH
 		{	// prepend with 0.000...
 			buffer.copy_within(pos .. pos+len, pos+e-len+2);
-			&mut buffer[pos .. pos+e-len+2].copy_from_slice(&FORMAT_NUM_WIDTH_0Z[0 .. e-len+2]);
+			buffer[pos .. pos+e-len+2].copy_from_slice(&FORMAT_NUM_WIDTH_0Z[0 .. e-len+2]);
 			return Ok(e + 2);
 		}
 	}
@@ -1197,7 +1197,7 @@ pub fn number_to_string(buffer: &mut [u8; READER_BUFFER_SIZE], mut len: usize, m
 		else
 		{	buffer[len] = b'e';
 			len += 1;
-			&mut buffer[len .. len+exponent_str.len()].copy_from_slice(exponent_str);
+			buffer[len .. len+exponent_str.len()].copy_from_slice(exponent_str);
 			len += exponent_str.len();
 			return Ok(len);
 		}
@@ -2032,15 +2032,15 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 	pub fn read_bytes(&mut self) -> io::Result<&[u8]>
 	{	match self.next_token()?
 		{	Token::Null =>
-			{	&mut self.buffer[0 .. 4].copy_from_slice(b"null");
+			{	self.buffer[0 .. 4].copy_from_slice(b"null");
 				Ok(&self.buffer[0 .. 4])
 			},
 			Token::False =>
-			{	&mut self.buffer[0 .. 5].copy_from_slice(b"false");
+			{	self.buffer[0 .. 5].copy_from_slice(b"false");
 				Ok(&self.buffer[0 .. 5])
 			},
 			Token::True =>
-			{	&mut self.buffer[0 .. 4].copy_from_slice(b"true");
+			{	self.buffer[0 .. 4].copy_from_slice(b"true");
 				Ok(&self.buffer[0 .. 4])
 			},
 			Token::Number(exponent, is_negative) =>

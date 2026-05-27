@@ -14,7 +14,7 @@ const HEX_DIGITS: [u8; 16] = [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'
 /// let json_encoded = format!("{{\"value\": \"{}\"}}", nop_json::escape(orig));
 /// assert_eq!(json_encoded, "{\"value\": \"Some \\\"quote\\\" and some \\\\.\"}");
 /// ```
-pub fn escape(s: &str) -> Cow<str>
+pub fn escape(s: &str) -> Cow<'_, str>
 {	let bytes = s.as_bytes();
 	if let Some(pos) = bytes.iter().position(|c| match *c {b'"' | b'\\' | 0..=31 => true, _ => false})
 	{	Cow::Owned(String::from_utf8(do_escape_bytes(bytes, pos)).unwrap())
@@ -25,7 +25,7 @@ pub fn escape(s: &str) -> Cow<str>
 }
 
 /// Like [escape](fn.escape.html), but for `&[u8]`.
-pub fn escape_bytes(bytes: &[u8]) -> Cow<[u8]>
+pub fn escape_bytes(bytes: &[u8]) -> Cow<'_, [u8]>
 {	if let Some(pos) = bytes.iter().position(|c| match *c {b'"' | b'\\' | 0..=31 => true, _ => false})
 	{	Cow::Owned(do_escape_bytes(bytes, pos))
 	}

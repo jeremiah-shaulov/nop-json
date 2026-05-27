@@ -2,7 +2,7 @@
 name = "nop-json"
 version = "2.0.5"
 authors = ["Jeremiah Shaulov <jeremiah.shaulov@gmail.com>"]
-edition = "2018"
+edition = "2024"
 license = "MIT"
 readme = "README.md"
 description = "JSON serialization/deserialization (full-featured, modern, optimal, streaming, direct into struct, binary-ready)"
@@ -10,7 +10,7 @@ repository = "https://github.com/jeremiah-shaulov/nop-json"
 keywords = ["json"]
 
 [dependencies]
-numtoa = "0.2"
+numtoa = "1.0"
 nop-json-derive = "2.0"
 
 [dev-dependencies]

@@ -263,6 +263,7 @@ fn test_value()
 	assert_eq!(Reader::new(r#" [-3000.0] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Number(3, 3, true)]));
 	assert_eq!(Reader::new(r#" [-3000.00e1] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Number(3, 4, true)]));
 	assert_eq!(Reader::new(r#" [-3000.00e-1] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Number(3, 2, true)]));
+	assert_eq!(Reader::new(r#" [-1234.56e-1] "#.bytes()).read::<Value>().unwrap(), Value::Array(vec![Value::Number(123456, -3, true)]));
 }
 
 #[test]

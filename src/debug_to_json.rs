@@ -173,7 +173,7 @@ impl DebugToJson for Value
 			{	let mut buffer = [0u8; 24];
 				let mantissa = mantissa.numtoa(10, &mut buffer);
 				let mut buffer = [0u8; READER_BUFFER_SIZE];
-				&mut buffer[0 .. mantissa.len()].copy_from_slice(&mantissa);
+				buffer[0 .. mantissa.len()].copy_from_slice(&mantissa);
 				let len = number_to_string(&mut buffer, mantissa.len(), exponent, is_negative).map_err(|_| fmt::Error {})?;
 				write!(out, "{}", String::from_utf8_lossy(&buffer[0 .. len]))
 			},
