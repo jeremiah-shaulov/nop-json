@@ -93,6 +93,23 @@ fn read_char_empty_is_error()
 }
 
 #[test]
+fn read_char_invalid_utf8_is_error_not_panic()
+{	// Crafted raw byte sequences that decode to non-scalar values must return Err,
+	// never panic (regression: char::from_u32(..).unwrap()).
+	let cases: &[&[u8]] = &
+	[	b"\"\xED\xA0\x80\"",     // encodes UTF-16 surrogate U+D800
+		b"\"\xED\xBF\xBF\"",     // encodes surrogate U+DFFF
+		b"\"\xF7\xBF\xBF\xBF\"", // decodes to 0x1FFFFF, beyond U+10FFFF
+		b"\"\xF4\x90\x80\x80\"", // decodes to 0x110000, just past the max
+		b"\"\x80\"",             // lone continuation byte
+	];
+	for raw in cases
+	{	let res = Reader::new(raw.iter().copied()).read::<char>();
+		assert!(res.is_err(), "expected Err for bytes {raw:02X?}");
+	}
+}
+
+#[test]
 fn read_bytes_returns_raw()
 {	let mut reader = Reader::new("\"abc\"".bytes());
 	assert_eq!(reader.read_bytes().unwrap(), b"abc");

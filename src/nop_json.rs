@@ -2146,19 +2146,19 @@ impl<T> Reader<T> where T: Iterator<Item=u8>
 		else if c&0xE0 == 0xC0 // 110xxxxx
 		{	if self.buffer_len >= 2
 			{	let c = (self.buffer[1] as u32) & 0x3F | ((c & 0x1F) << 6);
-				return Ok(char::from_u32(c).unwrap());
+				return char::from_u32(c).ok_or_else(|| self.format_error("Invalid UTF-8 string"));
 			}
 		}
 		else if c&0xF0 == 0xE0 // 1110xxxx
 		{	if self.buffer_len >= 3
 			{	let c = (self.buffer[2] as u32) & 0x3F | (((self.buffer[1] as u32) & 0x3F) << 6) | ((c & 0xF) << 12);
-				return Ok(char::from_u32(c).unwrap());
+				return char::from_u32(c).ok_or_else(|| self.format_error("Invalid UTF-8 string"));
 			}
 		}
 		else if c&0xF8 == 0xF0 // 11110xxx
 		{	if self.buffer_len >= 4
 			{	let c = (self.buffer[3] as u32) & 0x3F | (((self.buffer[2] as u32) & 0x3F) << 6) | (((self.buffer[1] as u32) & 0x3F) << 12) | ((c & 0x7) << 18);
-				return Ok(char::from_u32(c).unwrap());
+				return char::from_u32(c).ok_or_else(|| self.format_error("Invalid UTF-8 string"));
 			}
 		}
 		return Err(self.format_error("Invalid UTF-8 string"));
